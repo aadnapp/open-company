@@ -16,6 +16,7 @@ open-source-software/
 │   ├── daily-patrol/                # 团队级日常巡检（每晚 21:00 盘点进度、提炼跨产品通用经验）
 │   └── computer/                    # 团队级通用桌面操作班次（按指令执行系统级 GUI 交互）
 └── products/
+    ├── weband/                      # SF32LB52 硬件固件复刻（Productfile.yaml、AGENTS.md、projects/firmware/tasks/ 2 条按需任务）
     └── open-compare/
         ├── Productfile.yaml         # 绑定 OpenCompare 代码仓库与运营项目分组
         ├── AGENTS.md                # OpenCompare 产品定位、功能优先级（P0/P1）与桌面验收标准

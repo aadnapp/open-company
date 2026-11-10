@@ -1,0 +1,17 @@
+# Open Company 定时任务(按系统时区执行,本机为 Asia/Shanghai)
+# 安装: crontab scripts/cron/crontab.example   (会整体替换当前用户的 crontab,先 crontab -l 确认没有别的条目)
+# 日志: ~/.local/state/open-company/logs/   待人处理: ~/.local/state/open-company/needs-owner.log
+# 本机网络约 22:00 断开、09:00 恢复,需要联网的任务只排在 09:05–21:59 之间。
+#
+# OpenCompare 只作为参考模板,不做实际运营:盯盘(github-issue-pr-actions)和发版(release-batch)不排班。
+# 要恢复时参考下面两行(去掉行首 #),并先把 ~/.config/open-company/env 的 GITHUB_REPO 指向真实产品仓库:
+#   5-59/10 9-21 * * * /home/whole/data/src/open-company/scripts/cron/run-task.sh github-issue-pr-actions >/dev/null 2>&1
+#   30 9 * * * /home/whole/data/src/open-company/scripts/cron/run-task.sh release-batch >/dev/null 2>&1
+SHELL=/bin/bash
+
+# 每晚 21:00 进度盘点与经验总结(断网前完成)
+0 21 * * * /home/whole/data/src/open-company/scripts/cron/run-task.sh daily-patrol >/dev/null 2>&1
+
+# 每小时第 7 分钟: 先写每个角色的当日 digest,再生成图形化进度报告(纯本地读日志,不联网、不调用 Agent)
+# 输出 ~/.local/state/open-company/digests/<日期>/<角色>.md 与 ~/.local/state/open-company/report/index.html
+7 * * * * cd /home/whole/data/src/open-company/scripts/report && /usr/bin/python3 build_digests.py && /usr/bin/python3 build_report.py >/dev/null 2>&1

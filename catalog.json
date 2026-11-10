@@ -91,6 +91,29 @@
               "title": "每日 07:00 定时发版"
             }
           ]
+        },
+        {
+          "id": "weband",
+          "title": "Weband",
+          "lifecycle": "incubating",
+          "git": "git@github.com:aadnapp/weband.git",
+          "branch": "main",
+          "summary": {
+            "zh": "SF32LB52 硬件固件复刻：配备 2 项按需值班任务（构建烧录串口基线、按里程碑移植功能），均需真实开发板在线，不挂定时。",
+            "en": "SF32LB52 hardware firmware clone with 2 on-demand shifts (build/flash/serial baseline, milestone-based feature porting). Both need a real dev board, so neither is scheduled."
+          },
+          "projectsCount": 1,
+          "tasksCount": 2,
+          "tasks": [
+            {
+              "id": "firmware-build-flash",
+              "title": "固件构建与烧录基线"
+            },
+            {
+              "id": "firmware-port",
+              "title": "固件功能移植"
+            }
+          ]
         }
       ]
     }

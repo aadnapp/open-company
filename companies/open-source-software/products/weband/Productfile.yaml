@@ -1,0 +1,14 @@
+spec: open-company/v0
+id: weband
+title: Weband
+lifecycle: incubating
+source:
+  git: git@github.com:aadnapp/weband.git
+  branch: main
+groups:
+  - id: firmware
+    title: 固件研发
+projects:
+  - id: firmware
+    title: SF32LB52 固件复刻
+    group: firmware

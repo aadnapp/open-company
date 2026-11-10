@@ -37,6 +37,10 @@ const BILINGUAL_METADATA = {
         zh: "配备 7 项日常值班任务：GitHub Issue 与构建报错盯盘、每日 07:00 定时发版、安装包启动自检、大文件夹性能测试、软件界面交互实测、桌面系统窗口实测、发版后自动回帖关单。",
         en: "Equipped with 7 standing shifts: GitHub issue & CI watch, 07:00 daily release, installer smoke check, large-folder stress test, UI interaction check, native window check, and post-release issue replies.",
       },
+      weband: {
+        zh: "SF32LB52 硬件固件复刻：配备 2 项按需值班任务（构建烧录串口基线、按里程碑移植功能），均需真实开发板在线，不挂定时。",
+        en: "SF32LB52 hardware firmware clone with 2 on-demand shifts (build/flash/serial baseline, milestone-based feature porting). Both need a real dev board, so neither is scheduled.",
+      },
     },
   },
 };
