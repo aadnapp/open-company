@@ -16,6 +16,7 @@
 
 | 事项 | 方式 | 时间 |
 |---|---|---|
+| 从上游 `munk-sh/open-company` 同步 | **人工**，按 4 节「上游同步（人工）」的 git 步骤 | 按需 |
 | 晚间盘点 `daily-patrol` | cron 自动，调用 Kiro CLI | 每天 21:00 |
 | 角色 digest + 图形化报告 | cron 自动，纯本地，不联网 | 每小时第 7 分钟 |
 | Weband 构建、烧录、上板验证 | **人工触发**，需要开发板在线 | 按需 |
@@ -109,6 +110,36 @@ crontab -e                                         # 手动编辑，删行即停
 每场的输出：
 - 运行日志：`~/.local/state/open-company/logs/<任务>-<日期>.log`
 - 每场 digest 与 Agent 输出：`~/.local/state/open-company/runs/<任务>/<时间戳>/{digest.md,agent.log}`
+
+### 上游同步（人工）
+
+本仓库有两个远端：`origin` 是上游 `munk-sh/open-company`（只拉不推），`fork` 是我们自己的 `aadnapp/open-company`（本地 `main` 跟踪 `fork/main`）。不自动同步，需要时按下面步骤手动做：
+
+```bash
+cd /home/whole/data/src/open-company
+git status --short                     # 1. 工作区必须干净，有改动先提交
+git fetch origin                       # 2. 拉上游；网络时好时坏，失败就过一会儿再试
+git log --oneline HEAD..origin/main    # 3. 看上游有哪些新提交；没有输出就不用同步
+git diff --stat HEAD...origin/main     #    看改了哪些文件，留意 AGENTS.md 和 tasks/*.md
+git merge --no-ff origin/main          # 4. 合并；有冲突时解决后 git add <文件> && git commit，放弃用 git merge --abort
+```
+
+5. 重新生成 `catalog.json`，有变化就单独提交（否则仓库的 CI 检查会失败）：
+```bash
+PATH=/home/whole/.nvm/versions/node/v24.16.0/bin:$PATH node scripts/build-catalog.mjs
+git diff --stat catalog.json           # 有输出才需要下一行
+git commit -m "chore: rebuild catalog.json after upstream merge" catalog.json
+```
+
+6. 检查 steering 引用的源文件是否都还在（有 `MISSING` 输出，说明上游改名或删除了被引用的文件，要同步改 `.kiro/steering/` 里对应的 `#[[file:...]]`）：
+```bash
+for f in $(grep -ho '#\[\[file:[^]]*\]\]' .kiro/steering/*.md | sed 's/#\[\[file://;s/\]\]//' | sort -u); do [ -f "$f" ] || echo "MISSING $f"; done
+```
+
+7. 推送到自己的 fork：
+```bash
+git push fork main
+```
 
 ### 无人值守场次的安全边界
 cron 场次里 Agent 是用 `--trust-all-tools --trust-workspace` 启动的，工具调用不再逐个确认。挡住推 tag、发版、删文件这类操作的，只有 prompt 里的规则，没有技术拦截。要收紧，在 env 里设 `KIRO_TRUST_FLAGS` 只放行指定工具。
