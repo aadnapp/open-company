@@ -17,9 +17,12 @@
 - 首次提交已完成（2026-11-10）：`main` @ `a6f1c46`（两个提交已合并为一个），38 个文件；SDK、Flash 镜像、板图不入库。
 - 远端：`origin` = `git@github.com:aadnapp/weband.git`（私有）。2026-11-10 已推送 `main`，远端与本地同为 `a6f1c46`。
 
+- M2 开工（2026-11-11）：worktree `/home/whole/data/reawork/weband/.worktrees/m2-ble-protocol`，分支 `m2-ble-protocol`（基于 main `bb4ca8d`）。提交 `00efbb7`：把我们早先 refboard 示例的协议核心（mb_proto / mb_frame / mb_hmac）和主机单测移到 `app/`，`make -C app/test/host check` 72/72 通过。GATT / 存储 / 平台胶水（原 b2074d76）尚未移植。
+- 两仓 2026-11-11 已提交未推送：Weband `417c254`、`bb4ca8d`；open-company `40a140c`、`878d003`。
+
 ## 等待项（等人）
 1. 采购 P1 外设（见 `goal.md`），不阻塞 P0。按 V1：麦已有（3037 模拟麦）；缺 JDI387A 圆屏 + 转接。充电要换锂电版芯片的板子（如 SF32LB52-DevKit-LCD）+ 锂电池，是否购买待用户决定。不再需要 PDM 麦、JD7601、LGS4056。
-2. M2 开工需要用户触发（`#task-firmware-port`，brief 写 M2 与要实现的行为）。
+2. M2 两个待定：① 线协议对齐 V1 1.15.35（字段更多，需再逆向）还是沿用现有按 V2 写的核心；② BLE 联调用什么当 central（本机无蓝牙适配器：手机 + nRF Connect，或买 USB 蓝牙适配器 + bleak 脚本）。
 
 ## 下一步
 - M2（BLE 控制协议）在独立 worktree 开工：先写主机单测，再上板联调 `pair → auth → ok`。
