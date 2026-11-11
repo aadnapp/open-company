@@ -3,6 +3,9 @@
 最近更新：2026-11-10
 
 ## 现状
+- **对标改为 refdevice V1 圆屏**（2026-11-10 用户决定）。依据：V1 固件 `1.15.35-v1-round-serial`（板级 `sf32lb52-refboard-v1`）字符串里有 30 处 audcodec/audprc、0 处 PDM，显示为 `jdi387a`，充电走片内 PMU；V2 固件 `2.15.12` 则是 22 处 PDM、0 处 audcodec、JD7601、LGS4056。V1 原理图（`/home/whole/share/mic_imu.webp`）的模拟麦 `MIC_BIAS`/`MIC_ADC` 与 V1 固件一致。此前文档里的"PDM 麦"只适用于 V2。
+  - 已更新：`AGENTS.md`、`goal.md`、Weband 仓库 `docs/hardware-inventory.md`（第 2 节改为 V1 外设，V2 移到 2b，待核实项 C5）、`firmware-port.md` 资料入口。Weband 仓库的改动尚未提交。
+  - 原 `refboard-v2/design.md` 是 V2 设计，外设部分不再适用。
 - M0 已完成（2026-11-09）：hello_world 在 Nano 上编译、烧录、回读一致、串口启动正常。
 - M1 已完成（2026-11-10）：
   - 树外板级 `boards/sf32lb52-weband`，编译通过；除板名与 LED 极性外与 SDK 的 Nano 板等价。
@@ -15,7 +18,7 @@
 - 远端：`origin` = `git@github.com:aadnapp/weband.git`（私有）。2026-11-10 已推送 `main`，远端与本地同为 `a6f1c46`。
 
 ## 等待项（等人）
-1. 采购 P1 外设（见 `goal.md`），不阻塞 P0。
+1. 采购 P1 外设（见 `goal.md`），不阻塞 P0。按 V1：麦已有（3037 模拟麦）；缺 JDI387A 圆屏 + 转接。充电要换锂电版芯片的板子（如 SF32LB52-DevKit-LCD）+ 锂电池，是否购买待用户决定。不再需要 PDM 麦、JD7601、LGS4056。
 2. M2 开工需要用户触发（`#task-firmware-port`，brief 写 M2 与要实现的行为）。
 
 ## 下一步
@@ -29,5 +32,10 @@
 - 出厂备份：`evidence/factory_flash_first4MB.bin`（不入库）
 
 ## 卡点 / 风险
+- V1 纸面核实已完成（2026-11-10，Weband `docs/hardware-inventory.md` C5，证据 `evidence/nano_sch/`）：模拟麦可直接接 J1-4/5（板上有 2.2 µF 隔直，MIC_BIAS 1.4–2.8 V）；JDI 14 根信号都已引出；**Nano 芯片不带充电，M4 充电部分在 Nano 上 blocked**。
+- IMU：V1 固件反汇编确认不访问 LSM6DS3TR-C（0x6A），不对标（证据 `/home/whole/data/reawork/refdevice-v1/analysis/imu_findings.txt` 及同目录脚本）。
+- M3 硬件链路实测通过（2026-11-10）：板上烧了 SDK `audprc` 例程（非 hello_world），3037 模拟麦经 MIC_BIAS 供电能拾音，安静 −51 dBFS、出声 −31…−23 dBFS；导出的 8 kHz WAV 用户试听正常（Weband `evidence/digest.md`）。新增 `scripts/serial_capture.py`、`scripts/pcm_stats.py`，修了 `scripts/build.sh` 传参 bug，均未提交。
+- 仍未核实：MIC_BIAS 电压值（没有万用表，只间接确认可用）；JDI387A 屏自身的供电与 VCOM 要求（需屏规格书）；V1 电源键是否 PA34。
+- BLE 协议逆向基于 V2 固件，M2 用到时要拿 V1 固件字符串（`/home/whole/data/reawork/refdevice-v1/v1_strings.txt`）复核命令与状态串。
 - refdevice 长按电源键的时长没有证据；KEY1 按住 10 s 会硬件复位，长按动作必须在此之前触发。
 - refdevice 应用源码私有，M2 起按逆向协议净室重写；无证据的字段标 `TODO(weband)`。
