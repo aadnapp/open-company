@@ -4,9 +4,11 @@
 Reads (all local, nothing is sent anywhere):
   ~/.local/state/open-company/logs/<task>-<date>.log   cron runner log (run-task.sh)
   ~/.local/state/open-company/runs/<task>/<ts>/digest.md
+  ~/.local/state/open-company/activity/<date>.jsonl    activity log (log_activity.py: IDE sessions + Stop-hook heartbeats)
   ~/.local/state/open-company/needs-owner.log
+  /proc/*/cmdline                                       to tell which cron tasks are running right now
   <repo>/companies/*/products/*/goal.md, handoff.md
-  manual digests listed in MANUAL_DIGESTS
+  evidence digests listed in MANUAL_ROLES
 
 Writes ~/.local/state/open-company/report/index.html (no scripts, no external assets).
 
@@ -16,6 +18,7 @@ Python 3.8+, standard library only.
 import argparse
 import datetime as dt
 import html
+import json
 import os
 import re
 from collections import defaultdict
@@ -32,14 +35,32 @@ ROLES = {
 }
 # Products kept only as reference templates: not shown in the progress section, not reconciled by daily-patrol
 TEMPLATE_PRODUCTS = {"open-compare"}
-# Work done by hand in the IDE, recorded in per-product digests
-MANUAL_DIGESTS = [
+# Roles worked by hand in IDE sessions: (role, product, evidence digest or None).
+# They report through the activity log (log_activity.py); the evidence digest is the
+# product's own append-only step log, shown as a second source.
+MANUAL_ROLES = [
     ("固件研发与实测", "Weband", Path("/home/whole/data/reawork/weband/evidence/digest.md")),
+    ("团队运营", "团队", None),  # work on this repo itself: rules, cron, report scripts
 ]
+# Activity kinds accepted by log_activity.py, in report order
+KINDS = {"start": "开始", "progress": "进展", "done": "完成", "blocked": "受阻", "waiting": "等人", "heartbeat": "会话心跳"}
+REFRESH_MINUTE = 7  # build_digests + build_report run at minute 7 of every hour (crontab)
 
 LINE_RE = re.compile(r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) \[([\w-]+)\] (.*)$")
-COLORS = {"err": "#d64545", "woke": "#2f6fdb", "run": "#1f9d55", "ok": "#b9c2cc", "skip": "#e0a100"}
-LABELS = {"ok": "检查无事件", "woke": "有事件唤醒", "run": "Agent 运行", "err": "出错", "skip": "跳过（上一场未结束）"}
+COLORS = {"err": "#d64545", "woke": "#2f6fdb", "run": "#1f9d55", "ok": "#b9c2cc", "skip": "#e0a100",
+          "act": "#7b5cd6", "hb": "#cdbff2"}
+LABELS = {"ok": "检查无事件", "woke": "有事件唤醒", "run": "Agent 运行", "err": "出错 / 受阻", "skip": "跳过 / 等人",
+          "act": "IDE 记录了进展", "hb": "IDE 会话有活动（只有心跳）"}
+# activity kind -> timeline colour key
+ACT_COLOR = {"start": "act", "progress": "act", "done": "act", "blocked": "err", "waiting": "skip", "heartbeat": "hb"}
+HB_ROW = "IDE 会话心跳"
+
+
+def known_roles():
+    """role name -> product, for every role that may write to the activity log."""
+    roles = {role: product for role, product in ROLES.values()}
+    roles.update({r: p for r, p, _ in MANUAL_ROLES})
+    return roles
 
 
 def esc(s):
@@ -113,6 +134,44 @@ def read_needs_owner():
     return f.read_text(encoding="utf-8", errors="replace").splitlines() if f.exists() else []
 
 
+def read_activity(since):
+    """Activity log records at or after `since`, oldest first. Bad lines are skipped."""
+    out = []
+    d = STATE / "activity"
+    for f in sorted(d.glob("*.jsonl")) if d.exists() else []:
+        try:
+            day = dt.date.fromisoformat(f.stem)
+        except ValueError:
+            continue
+        if day < since.date():
+            continue
+        for line in f.read_text(encoding="utf-8", errors="replace").splitlines():
+            try:
+                r = json.loads(line)
+                r["t"] = dt.datetime.fromisoformat(r["ts"])
+            except (ValueError, KeyError, TypeError):
+                continue
+            if r["t"] >= since and r.get("kind") in KINDS:
+                out.append(r)
+    out.sort(key=lambda r: r["t"])
+    return out
+
+
+def running_tasks():
+    """Cron tasks with a live run-task.sh process. Reads /proc only; never touches the task locks,
+    because run-task.sh uses `flock -n` and even a brief probe could make a real run skip."""
+    found = set()
+    for p in Path("/proc").glob("[0-9]*/cmdline"):
+        try:
+            argv = p.read_bytes().split(b"\0")
+        except OSError:
+            continue
+        for i, a in enumerate(argv[:-1]):
+            if a.endswith(b"run-task.sh"):
+                found.add(argv[i + 1].decode("utf-8", "replace"))
+    return found & set(ROLES)
+
+
 def read_products():
     out = []
     for pdir in sorted(REPO.glob("companies/*/products/*")):
@@ -138,31 +197,54 @@ def read_products():
     return out
 
 
+def step_key(head):
+    """Step name of a digest line: text before the first ':' or '(' (e.g. 'KEY1/KEY2', 'audprc 烧录')."""
+    return re.split(r"[:：(（]", head, 1)[0].strip().lower()
+
+
 def read_manual():
+    """Verdict lines of each manual role's evidence digest, in file order.
+
+    The digest is append-only, so an early 'pending' line for a step stays in the file after
+    the step is settled. Only the last line per step name is kept (heuristic: see step_key)."""
     out = []
-    for role, product, path in MANUAL_DIGESTS:
+    for role, product, path in MANUAL_ROLES:
+        if path is None:
+            continue
         items = []
         if path.exists():
             for l in path.read_text(encoding="utf-8", errors="replace").splitlines():
                 if l.startswith("- ") and "判定" in l:
                     head, _, verdict = l[2:].rpartition("判定")
                     items.append((head.strip(" .:：,，"), verdict.strip(" :：")))
-        out.append({"role": role, "product": product, "path": path, "items": items})
+        last = {}
+        for n, (head, _) in enumerate(items):
+            last[step_key(head)] = n
+        items = [it for n, it in enumerate(items) if last[step_key(it[0])] == n]
+        out.append({"role": role, "product": product, "path": path, "items": items,
+                    "mtime": dt.datetime.fromtimestamp(path.stat().st_mtime) if path.exists() else None})
     return out
 
 
-def timeline_svg(events, since, days):
-    """One row per cron role, one cell per hour, coloured by the worst outcome in that hour."""
+def timeline_svg(events, activity, since, days):
+    """One row per role (cron roles, then manual roles, then IDE heartbeats), one cell per hour,
+    coloured by the most notable outcome in that hour."""
     hours = days * 24
     left, cell_w, row_h, top = 110, 6, 26, 28
     width = left + hours * cell_w + 10
-    tasks = list(ROLES)
+    rows = [(task, ROLES[task][0]) for task in ROLES] + [(r, r) for r, _, _ in MANUAL_ROLES] + [(HB_ROW, HB_ROW)]
+    tasks = [k for k, _ in rows]
+    label = dict(rows)
     height = top + len(tasks) * row_h + 24
     buckets = defaultdict(lambda: defaultdict(int))
     for t, task, kind, _ in events:
         if kind and task in ROLES:
             buckets[(task, int((t - since).total_seconds() // 3600))][kind] += 1
-    rank = ["err", "woke", "run", "skip", "ok"]
+    for r in activity:
+        key = HB_ROW if r["kind"] == "heartbeat" else r.get("role")
+        if key in label:
+            buckets[(key, int((r["t"] - since).total_seconds() // 3600))][ACT_COLOR[r["kind"]]] += 1
+    rank = ["err", "woke", "run", "skip", "act", "hb", "ok"]
     parts = ['<svg role="img" aria-labelledby="tl-title" viewBox="0 0 %d %d" width="100%%">' % (width, height),
              '<title id="tl-title">最近 %d 天各角色每小时活动</title>' % days]
     for d in range(days + 1):
@@ -175,7 +257,7 @@ def timeline_svg(events, since, days):
                          % (x + 4, top - 10, day.strftime("%m-%d %a")))
     for i, task in enumerate(tasks):
         y = top + i * row_h
-        parts.append('<text x="0" y="%d" font-size="13" fill="#111">%s</text>' % (y + 16, esc(ROLES[task][0])))
+        parts.append('<text x="0" y="%d" font-size="13" fill="#111">%s</text>' % (y + 16, esc(label[task])))
         parts.append('<rect x="%d" y="%d" width="%d" height="%d" fill="#f3f5f7"/>'
                      % (left, y + 3, hours * cell_w, row_h - 6))
         for h in range(hours):
@@ -184,7 +266,7 @@ def timeline_svg(events, since, days):
                 continue
             kind = next(k for k in rank if b.get(k))
             start = since + dt.timedelta(hours=h)
-            tip = "%s %s–%02d:00  " % (ROLES[task][0], start.strftime("%m-%d %H:00"), (start.hour + 1) % 24)
+            tip = "%s %s–%02d:00  " % (label[task], start.strftime("%m-%d %H:00"), (start.hour + 1) % 24)
             tip += "，".join("%s %d" % (LABELS[k], b[k]) for k in rank if b.get(k))
             parts.append('<rect x="%d" y="%d" width="%d" height="%d" fill="%s"><title>%s</title></rect>'
                          % (left + h * cell_w, y + 3, cell_w - 1, row_h - 6, COLORS[kind], esc(tip)))
@@ -192,41 +274,124 @@ def timeline_svg(events, since, days):
     return "\n".join(parts)
 
 
-def role_cards(events, runs):
-    cards = []
-    for task, (role, product) in ROLES.items():
-        ev = [e for e in events if e[1] == task]
-        cnt = defaultdict(int)
-        for e in ev:
-            if e[2]:
-                cnt[e[2]] += 1
-        task_runs = [r for r in runs if r["task"] == task]
-        last = ev[-1] if ev else None
-        if not ev:
-            status, cls = "无活动", "idle"
-        elif last[2] == "err":
-            status, cls = "最近一次出错", "bad"
+def fmt_age(now, t):
+    m = int((now - t).total_seconds() // 60)
+    return "%d 分钟前" % m if m < 60 else ("%d 小时前" % (m // 60) if m < 48 * 60 else t.strftime("%m-%d %H:%M"))
+
+
+def cron_card(task, role, product, events, runs, running, now):
+    ev = [e for e in events if e[1] == task]
+    cnt = defaultdict(int)
+    for e in ev:
+        if e[2]:
+            cnt[e[2]] += 1
+    task_runs = [r for r in runs if r["task"] == task]
+    last = ev[-1] if ev else None
+    open_run = next((r for r in task_runs if not r["end"]), None)
+    if task in running:
+        since = open_run["start"] if open_run else None
+        status = "运行中" + ("，已 %d 分钟（%s 开始）" % ((now - since).total_seconds() // 60, since.strftime("%H:%M"))
+                             if since else "（还在预检，未启动 Agent）")
+        cls = "run"
+    elif not ev:
+        status, cls = "无活动", "idle"
+    elif last[2] == "err":
+        status, cls = "最近一次出错", "bad"
+    else:
+        recent_err = sum(1 for e in ev if e[2] == "err" and e[0] > last[0] - dt.timedelta(hours=24))
+        if recent_err:
+            status, cls = "已恢复，24 小时内出错 %d 次" % recent_err, "warn"
         else:
-            recent_err = sum(1 for e in ev if e[2] == "err" and e[0] > last[0] - dt.timedelta(hours=24))
-            if recent_err:
-                status, cls = "已恢复，24 小时内出错 %d 次" % recent_err, "warn"
-            else:
-                status, cls = "正常", "good"
-        cards.append(
-            '<div class="card %s"><h3>%s <small>%s</small></h3><p class="status">%s</p><ul>'
+            status, cls = "正常", "good"
+    extra = ""
+    if task in running and open_run:
+        extra = "<li>本场 digest：<code>%s</code></li>" % esc(open_run["dir"] / "digest.md")
+    return ('<div class="card %s"><h3>%s <small>%s · cron</small></h3><p class="status">%s</p><ul>'
             '<li>检查 %d 次（无事件 %d / 唤醒 %d / 出错 %d）</li><li>Agent 运行 %d 场</li>'
-            '<li>最近活动：%s</li></ul></div>'
+            '<li>最近活动：%s</li>%s</ul></div>'
             % (cls, esc(role), esc(product), esc(status), cnt["ok"] + cnt["woke"] + cnt["err"], cnt["ok"],
-               cnt["woke"], cnt["err"], len(task_runs), esc(last[0].strftime("%m-%d %H:%M") + " " + last[3]) if last else "—"))
+               cnt["woke"], cnt["err"], len(task_runs),
+               esc(last[0].strftime("%m-%d %H:%M") + " " + last[3]) if last else "—", extra))
+
+
+def current_milestone(prod):
+    """First milestone whose status is not finished, from goal.md's table."""
+    for item, what, status in (prod or {}).get("milestones", []):
+        if not status.startswith("已完成"):
+            return "%s %s（%s）" % (item, what, status)
+    return None
+
+
+def manual_card(role, product, activity, manual, products, now):
+    acts = [r for r in activity if r.get("role") == role]
+    today = [r for r in acts if r["t"].date() == now.date()]
+    beats = [r for r in activity if r["kind"] == "heartbeat"]
+    last = acts[-1] if acts else None
+    m = next((x for x in manual if x["role"] == role), None)
+    if not last:
+        status, cls = "最近 7 天没有活动日志记录", "idle"
+        if m and m["mtime"]:
+            status += "（证据 digest %s更新，见下方「手动任务」）" % fmt_age(now, m["mtime"])
+    else:
+        status = "%s：%s（%s）" % (KINDS[last["kind"]], last["text"], fmt_age(now, last["t"]))
+        cls = {"blocked": "bad", "waiting": "warn", "start": "run", "progress": "run"}.get(last["kind"], "good")
+        if last["kind"] in ("start", "progress") and now - last["t"] > dt.timedelta(hours=6):
+            cls = "idle"
+            status += "，之后没有新记录"
+    prod = next((p for p in products if p["id"].lower() == product.lower()), None)
+    lis = []
+    ms = current_milestone(prod)
+    if ms:
+        lis.append("<li>当前里程碑：%s</li>" % esc(ms))
+    lis.append("<li>今天记录 %d 条</li>" % len(today))
+    for r in acts[-5:][::-1]:
+        lis.append("<li>%s %s — %s</li>" % (esc(r["t"].strftime("%m-%d %H:%M")), esc(KINDS[r["kind"]]), esc(r["text"])))
+    # a session was active after the last logged entry: say so, so a missing log line is visible
+    if beats and (not last or beats[-1]["t"] - last["t"] > dt.timedelta(minutes=30)):
+        lis.append('<li class="hint">IDE 会话最近活动 %s，此后没有记录进展（心跳不区分角色）</li>'
+                   % esc(fmt_age(now, beats[-1]["t"])))
+    if m and m["mtime"]:
+        lis.append("<li>证据 digest 更新：%s</li>" % esc(fmt_age(now, m["mtime"])))
+    if prod and prod["waiting"]:
+        lis.append("<li>等人处理 %d 项（见产品进度）</li>" % len(prod["waiting"]))
+    return ('<div class="card %s"><h3>%s <small>%s · IDE 手动</small></h3><p class="status">%s</p><ul>%s</ul></div>'
+            % (cls, esc(role), esc(product), esc(status), "".join(lis)))
+
+
+def role_cards(events, runs, activity, manual, products, running, now):
+    cards = [cron_card(task, role, product, events, runs, running, now) for task, (role, product) in ROLES.items()]
+    cards += [manual_card(role, product, activity, manual, products, now) for role, product, _ in MANUAL_ROLES]
     return "\n".join(cards)
 
 
-def runs_table(runs):
+def activity_table(activity, now):
+    rows = [r for r in activity if r["kind"] != "heartbeat" and r["t"].date() == now.date()][::-1][:60]
+    if not rows:
+        return ("<p>今天还没有活动记录。IDE 会话按 <code>.kiro/steering/activity-log.md</code> 用 "
+                "<code>scripts/report/log_activity.py</code> 记录。</p>")
+    body = "".join("<tr><td>%s</td><td>%s</td><td>%s</td><td>%s%s</td></tr>"
+                   % (esc(r["t"].strftime("%H:%M")), esc(r.get("role", "")), esc(KINDS[r["kind"]]), esc(r["text"]),
+                      " <code>%s</code>" % esc(r["ref"]) if r.get("ref") else "") for r in rows)
+    return ('<table><thead><tr><th scope="col">时间</th><th scope="col">角色</th><th scope="col">类型</th>'
+            '<th scope="col">内容</th></tr></thead><tbody>%s</tbody></table>' % body)
+
+
+def runs_table(runs, running):
     if not runs:
         return "<p>这段时间没有 Agent 运行。</p>"
+    # the newest open run of a task whose run-task.sh is alive is the live one; older open runs were cut off
+    live = {}
+    for r in runs:  # newest first
+        if not r["end"] and r["task"] in running and r["task"] not in live:
+            live[r["task"]] = r
     rows = []
     for r in runs:
-        dur = "运行中或被中断" if not r["end"] else "%d 分 %02d 秒" % divmod(int((r["end"] - r["start"]).total_seconds()), 60)
+        if r["end"]:
+            dur = "%d 分 %02d 秒" % divmod(int((r["end"] - r["start"]).total_seconds()), 60)
+        elif live.get(r["task"]) is r:
+            dur = "运行中"
+        else:
+            dur = "被中断（日志没有结束记录）"
         flag = '<span class="tag bad">需要处理</span>' if r["needs_owner"] else ""
         hl = "".join("<li>%s</li>" % esc(h) for h in r["highlights"]) or "<li>（无 digest）</li>"
         rows.append("<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s<ul>%s</ul><code>%s</code></td></tr>"
@@ -272,8 +437,9 @@ def role_digests_section(day):
 def manual_section(manual):
     out = []
     for m in manual:
-        items = "".join("<li><b>%s</b> — %s</li>" % (esc(v), esc(h)) for h, v in m["items"][-15:])
-        out.append('<div class="card"><h3>%s <small>%s · 手动触发</small></h3><p>来源：<code>%s</code>（最近 15 条判定）</p><ul>%s</ul></div>'
+        items = "".join("<li>%s — <b>%s</b></li>" % (esc(h), esc(v)) for h, v in m["items"][-15:])
+        out.append('<div class="card"><h3>%s <small>%s · 手动触发</small></h3><p>来源：<code>%s</code>'
+                   '（最近 15 个步骤的最新判定，按时间先后；同一步骤只留最后一条）</p><ul>%s</ul></div>'
                    % (esc(m["role"]), esc(m["product"]), esc(m["path"]), items or "<li>无记录</li>"))
     return "\n".join(out)
 
@@ -285,6 +451,7 @@ h3{font-size:15px;margin:0 0 6px} h3 small,h4{font-weight:normal;color:#555;font
 .meta{color:#555;font-size:13px} .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px}
 .card{border:1px solid #d5dbe1;border-left:6px solid #8892a0;border-radius:6px;padding:10px 14px;background:#fafbfc}
 .card.good{border-left-color:#1f9d55} .card.bad{border-left-color:#d64545} .card.warn{border-left-color:#e0a100} .card.idle{border-left-color:#b9c2cc}
+.card.run{border-left-color:#2f6fdb} .hint{color:#8a5a00} .fresh{background:#f3f5f7;border:1px solid #d5dbe1;border-radius:6px;padding:6px 10px;font-size:13px}
 .card ul{margin:4px 0 0 18px;padding:0;font-size:13px} .status{margin:0;font-weight:600}
 table{border-collapse:collapse;width:100%;font-size:13px} th,td{border:1px solid #d5dbe1;padding:5px 7px;text-align:left;vertical-align:top}
 th{background:#eef1f4} td ul{margin:2px 0 2px 16px;padding:0} code{font-size:12px;color:#444;word-break:break-all}
@@ -294,30 +461,54 @@ pre{background:#f3f5f7;padding:8px;font-size:12px;white-space:pre-wrap}
 """
 
 
+def freshness(now, events, activity, manual):
+    """When each source last changed, and when the next scheduled rebuild is."""
+    nxt = now.replace(minute=REFRESH_MINUTE, second=0)
+    if nxt <= now:
+        nxt += dt.timedelta(hours=1)
+    beats = [r["t"] for r in activity if r["kind"] == "heartbeat"]
+    acts = [r["t"] for r in activity if r["kind"] != "heartbeat"]
+    src = [("cron 日志", events[-1][0] if events else None), ("活动日志", acts[-1] if acts else None),
+           ("IDE 心跳", beats[-1] if beats else None)]
+    src += [("%s 证据 digest" % m["product"], m["mtime"]) for m in manual]
+    parts = "；".join("%s %s" % (n, t.strftime("%m-%d %H:%M") if t else "无") for n, t in src)
+    return ('<p class="fresh">数据截至 <b>%s</b>（报告不是实时的，cron 每小时第 %d 分钟重建，下次约 <b>%s</b>；'
+            '想马上看最新的，按操作手册第 2 节手动重建）<br>各来源最近更新：%s</p>'
+            % (esc(now.strftime("%m-%d %H:%M")), REFRESH_MINUTE, esc(nxt.strftime("%H:%M")), esc(parts)))
+
+
 def build(days, out):
     now = dt.datetime.now().replace(microsecond=0)
     since = (now - dt.timedelta(days=days - 1)).replace(hour=0, minute=0, second=0)
     events = read_events(since)
     runs = read_runs(events)
+    activity = read_activity(since)
+    manual = read_manual()
+    products = read_products()
+    running = running_tasks()
     legend = "".join('<span><i style="background:%s"></i>%s</span>' % (COLORS[k], LABELS[k])
-                     for k in ("ok", "woke", "run", "skip", "err"))
+                     for k in ("ok", "woke", "run", "act", "hb", "skip", "err"))
     legend += '<span><i style="background:#f3f5f7;border:1px solid #ccc"></i>无记录（关机或未排班）</span>'
     needs = read_needs_owner()
     doc = """<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>Open Company 进度报告</title>
 <style>%s</style></head><body>
 <h1>Open Company 进度报告</h1>
-<p class="meta">生成时间 %s · 统计范围 %s 起 %d 天 · 数据来自本机 cron 日志与 digest，未联网</p>
+<p class="meta">生成时间 %s · 统计范围 %s 起 %d 天 · 数据来自本机 cron 日志、活动日志与 digest，未联网</p>
+%s
 <h2>各角色概览</h2><div class="grid">%s</div>
+<h2>今日活动（IDE 会话与任务记录，新的在上）</h2>%s
 <h2>今日各角色 digest</h2>%s
 <h2>时间线（每格 1 小时，悬停看明细）</h2><div class="legend">%s</div>%s
 <h2>Agent 运行记录</h2>%s
-<h2>手动任务</h2><div class="grid">%s</div>
+<h2>手动任务（证据 digest）</h2><div class="grid">%s</div>
 <h2>产品进度（goal.md / handoff.md）</h2><div class="grid">%s</div>
 <h2>待人处理（needs-owner.log）</h2><pre>%s</pre>
-</body></html>""" % (CSS, esc(now), esc(since.date()), days, role_cards(events, runs), role_digests_section(now.date()), legend,
-                     timeline_svg(events, since, days), runs_table(runs), manual_section(read_manual()),
-                     products_section(read_products()), esc("\n".join(needs[-20:]) or "无"))
+</body></html>""" % (CSS, esc(now), esc(since.date()), days, freshness(now, events, activity, manual),
+                     role_cards(events, runs, activity, manual, products, running, now), activity_table(activity, now),
+                     role_digests_section(now.date()), legend, timeline_svg(events, activity, since, days),
+                     runs_table(runs, running), manual_section(manual), products_section(products),
+                     esc("\n".join(needs[-20:]) or "无"))
     out.parent.mkdir(parents=True, exist_ok=True)
     tmp = out.with_suffix(".tmp")
     tmp.write_text(doc, encoding="utf-8")

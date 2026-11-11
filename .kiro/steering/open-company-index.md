@@ -23,7 +23,9 @@ inclusion: always
 - OpenCompare(**仅作参考模板,不做实际运营**,不挂 cron,晚间盘点也不对账;任务文件保留作写法示例):`#task-github-issue-pr-actions`、`#task-release-batch`、`#task-l1-package-smoke`、`#task-l2-large-dir-load`、`#task-l3-cdp-ui`、`#task-l3-computer-native`、`#task-issue-closeout`
 - Weband(固件,需真实开发板,手动触发):`#task-firmware-build-flash`、`#task-firmware-port`
 
-角色 digest:每个角色每天一份,`~/.local/state/open-company/digests/<日期>/<角色>.md`,由 cron 每小时用 `scripts/report/build_digests.py` 从日志和各场 digest 汇总生成;即使当天没有唤醒 Agent 也会生成。图形化报告 `~/.local/state/open-company/report/index.html` 同时更新。
+角色 digest:每个角色每天一份,`~/.local/state/open-company/digests/<日期>/<角色>.md`,由 cron 每小时用 `scripts/report/build_digests.py` 从日志、活动日志和各场 digest 汇总生成;即使当天没有唤醒 Agent 也会生成。图形化报告 `~/.local/state/open-company/report/index.html` 同时更新。
+
+活动日志:IDE 会话里替角色干活时,按 `activity-log.md`(always)用 `scripts/report/log_activity.py` 记一句话进展,写入 `~/.local/state/open-company/activity/<日期>.jsonl`;Stop hook 另记会话心跳。报告的角色概览、今日活动和时间线都读它。
 
 进度文件(每个产品目录下各一份,晚间盘点读取):
 - `goal.md`:当前目标、里程碑、结案条件。目标变化时更新。

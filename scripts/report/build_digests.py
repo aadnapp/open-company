@@ -2,7 +2,8 @@
 """Write one daily digest per role, so every role leaves a record even when no Agent ran.
 
 Cron roles (盯盘分诊 / 定时发版 / 晚间复盘) are summarised from run-task.sh logs and the
-digests of their Agent runs. Manual roles point at the digest the task keeps in its work dir.
+digests of their Agent runs. Manual (IDE) roles are summarised from the activity log
+(log_activity.py) and point at the evidence digest the product keeps in its work dir.
 
 Output: ~/.local/state/open-company/digests/<YYYY-MM-DD>/<task-id>.md
 Usage:  build_digests.py [--date YYYY-MM-DD] [--days N]   (default: today and yesterday)
@@ -14,7 +15,7 @@ import re
 from collections import Counter
 from pathlib import Path
 
-from build_report import MANUAL_DIGESTS, ROLES, STATE, read_events, read_products, read_runs
+from build_report import KINDS, MANUAL_ROLES, ROLES, STATE, read_activity, read_events, read_products, read_runs
 
 # How each cron role is scheduled; keep in sync with scripts/cron/crontab.example
 SCHEDULE = {
@@ -76,7 +77,8 @@ def cron_digest(task, day, events, runs):
     lines += ["", "## Agent 运行"]
     if day_runs:
         for r in day_runs:
-            dur = "未结束或被中断" if not r["end"] else "%d 分 %02d 秒" % divmod(int((r["end"] - r["start"]).total_seconds()), 60)
+            dur = ("未结束（运行中，或被中断而没有结束记录）" if not r["end"]
+                   else "%d 分 %02d 秒" % divmod(int((r["end"] - r["start"]).total_seconds()), 60))
             lines.append("- %s，用时 %s，退出码 %s%s" % (r["start"].strftime("%H:%M"), dur,
                                                      r["exit"] if r["exit"] is not None else "—",
                                                      "，**needsOwner**" if r["needs_owner"] else ""))
@@ -89,18 +91,35 @@ def cron_digest(task, day, events, runs):
     return "\n".join(lines) + "\n"
 
 
-def manual_digest(role, product, path, day):
+def manual_digest(role, product, path, day, activity):
+    acts = [r for r in activity if r.get("role") == role and r["t"].date() == day]
+    beats = [r for r in activity if r["kind"] == "heartbeat" and r["t"].date() == day]
     lines = ["# %s · %s digest" % (role, day), "",
              "- 角色：%s，产品 %s" % (role, product),
-             "- 排班：手动触发（需要真实开发板，不挂 cron）"]
-    if not path.exists():
-        lines.append("- 结论：无记录（`%s` 不存在）" % path)
+             "- 排班：手动触发（IDE 会话，不挂 cron）"]
+    if acts:
+        last = acts[-1]
+        verdict = "当天 %d 条活动记录，最后一条 %s %s：%s" % (len(acts), last["t"].strftime("%H:%M"),
+                                                            KINDS[last["kind"]], last["text"])
+    else:
+        verdict = "当天没有活动记录"
+    if path is not None and path.exists():
+        mtime = dt.datetime.fromtimestamp(path.stat().st_mtime)
+        verdict += "；证据 digest %s" % ("当天有更新（最后修改 %s）" % mtime.strftime("%H:%M") if mtime.date() == day
+                                         else "当天无更新（最后修改 %s）" % mtime.strftime("%Y-%m-%d %H:%M"))
+    lines.append("- 结论：%s" % verdict)
+    if beats:
+        lines.append("- IDE 会话心跳：%d 次，%s – %s（心跳不区分角色）"
+                     % (len(beats), beats[0]["t"].strftime("%H:%M"), beats[-1]["t"].strftime("%H:%M")))
+    lines += ["", "## 当天活动"]
+    lines += ["- %s %s：%s%s" % (r["t"].strftime("%H:%M"), KINDS[r["kind"]], r["text"],
+                                 "（`%s`）" % r["ref"] if r.get("ref") else "") for r in acts] or ["- 无"]
+    if path is None:
         return "\n".join(lines) + "\n"
-    mtime = dt.datetime.fromtimestamp(path.stat().st_mtime)
-    touched = mtime.date() == day
-    lines.append("- 结论：%s" % ("当天有更新（最后修改 %s）" % mtime.strftime("%H:%M") if touched
-                                 else "当天无更新（最后修改 %s）" % mtime.strftime("%Y-%m-%d %H:%M")))
-    lines.append("- 任务 digest：`%s`（逐步实测记录，只追加，旧的 pending 行可能已在后文结案）" % path)
+    if not path.exists():
+        lines.append("- 证据 digest：无记录（`%s` 不存在）" % path)
+        return "\n".join(lines) + "\n"
+    lines += ["", "- 证据 digest：`%s`（逐步实测记录，只追加，旧的 pending 行可能已在后文结案）" % path]
     # Current open items come from the product's handoff.md, which is kept up to date,
     # rather than from the append-only task digest.
     prod = next((p for p in read_products() if p["id"].lower() == product.lower()), None)
@@ -110,7 +129,7 @@ def manual_digest(role, product, path, day):
 
 
 def slug(role):
-    return {"固件研发与实测": "weband-firmware"}.get(role, re.sub(r"\W+", "-", role))
+    return {"固件研发与实测": "weband-firmware", "团队运营": "team-ops"}.get(role, re.sub(r"\W+", "-", role))
 
 
 def main():
@@ -123,14 +142,16 @@ def main():
     since = dt.datetime.combine(min(days), dt.time()) - dt.timedelta(days=1)
     events = read_events(since)
     runs = read_runs(events)
+    activity = read_activity(since)
     for day in days:
         out = STATE / "digests" / day.isoformat()
         out.mkdir(parents=True, exist_ok=True)
         for task in ROLES:
             (out / ("%s.md" % task)).write_text(cron_digest(task, day, events, runs), encoding="utf-8")
-        for role, product, path in MANUAL_DIGESTS:
-            (out / ("%s.md" % slug(role))).write_text(manual_digest(role, product, path, day), encoding="utf-8")
-        print("wrote %s (%d roles)" % (out, len(ROLES) + len(MANUAL_DIGESTS)))
+        for role, product, path in MANUAL_ROLES:
+            (out / ("%s.md" % slug(role))).write_text(manual_digest(role, product, path, day, activity),
+                                                      encoding="utf-8")
+        print("wrote %s (%d roles)" % (out, len(ROLES) + len(MANUAL_ROLES)))
 
 
 if __name__ == "__main__":

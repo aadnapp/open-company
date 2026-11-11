@@ -1,6 +1,6 @@
 # 人工操作说明书
 
-这份说明书记录需要人来做或人来确认的关键步骤和命令。适用于本机（Ubuntu 20.04，用户 `whole`），最近整理：2026-11-10。
+这份说明书记录需要人来做或人来确认的关键步骤和命令。适用于本机（Ubuntu 20.04，用户 `whole`），最近整理：2026-11-11。
 
 两个工作区：
 - **Open Company 配置仓库**：`/home/whole/data/src/open-company`（团队规则、任务、cron 脚本、报告脚本）
@@ -19,6 +19,7 @@
 | 从上游 `munk-sh/open-company` 同步 | **人工**，按 4 节「上游同步（人工）」的 git 步骤 | 按需 |
 | 晚间盘点 `daily-patrol` | cron 自动，调用 Kiro CLI | 每天 21:00 |
 | 角色 digest + 图形化报告 | cron 自动，纯本地，不联网 | 每小时第 7 分钟 |
+| IDE 会话活动记录 | Agent 按 steering 规则记一句话；Stop hook 自动记心跳 | 每轮回复 |
 | Weband 构建、烧录、上板验证 | **人工触发**，需要开发板在线 | 按需 |
 | 推 tag、发 Release、GitHub 回帖关单、烧录、提交代码 | **必须人确认** | — |
 
@@ -29,8 +30,12 @@
 ## 2. 每天看什么
 
 ```bash
-# 图形化报告：各角色概览、7 天时间线、Agent 运行记录、产品进度、待人处理
+# 图形化报告：数据时间、各角色概览（cron 与 IDE 手动角色）、今日活动、7 天时间线、
+# Agent 运行记录、手动任务证据、产品进度、待人处理
 xdg-open ~/.local/state/open-company/report/index.html
+
+# 今天的活动日志（IDE 会话记的进展 + Stop hook 心跳），一行一条 JSON
+cat ~/.local/state/open-company/activity/$(date +%F).jsonl
 
 # 今天每个角色的 digest
 ls ~/.local/state/open-company/digests/$(date +%F)/
@@ -47,6 +52,16 @@ ls ~/.local/state/open-company/logs/
 ```bash
 cd /home/whole/data/src/open-company/scripts/report && python3 build_digests.py && python3 build_report.py
 ```
+
+报告不是实时的。页面顶部「数据截至」写了生成时间、下次重建时间和各来源最近更新时间；cron 任务正在跑时，角色卡片显示「运行中」（从 `/proc` 看 `run-task.sh` 进程，不碰任务锁）。
+
+### IDE 会话怎么进报告
+
+IDE 对话本身不进报告，只有写进活动日志的才看得到：
+- **一句话进展**：Agent 按 `.kiro/steering/activity-log.md` 调用 `scripts/report/log_activity.py --role <角色> --kind <start|progress|done|blocked|waiting> "<一句话>"`。角色只接受报告里登记过的（`build_report.py` 的 `ROLES` 与 `MANUAL_ROLES`），写错会报错。人也可以手动记一条。
+- **会话心跳**：`.kiro/hooks/activity-heartbeat.json`（Stop 触发）每轮回复结束调用 `log_activity.py --heartbeat`，同一工作区 10 分钟内只记一次，只记时间、工作区和 hook 输入的字段名，不记内容。心跳不区分角色。
+- 卡片上出现「IDE 会话最近活动…，此后没有记录进展」，说明会话在干活但没记进展，回头补记或提醒 Agent。
+- 新增手动角色：在 `build_report.py` 的 `MANUAL_ROLES` 加一行（角色、产品、证据 digest 路径或 `None`），再在 `build_digests.py` 的 `slug()` 给它一个文件名，并同步更新 `activity-log.md` 的角色列表。
 
 产品进度以产品目录下的两份文件为准，**里程碑或等待项变化时要更新**（晚间盘点超过 3 天没更新会列入督办）：
 - `companies/open-source-software/products/weband/goal.md`：目标、里程碑、结案条件

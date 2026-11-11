@@ -1,0 +1,15 @@
+{
+  "version": "v1",
+  "hooks": [
+    {
+      "name": "Activity heartbeat",
+      "trigger": "Stop",
+      "description": "After each Agent turn, record a session heartbeat (time and workspace only, no chat content) in ~/.local/state/open-company/activity/ so the progress report can show that an IDE session was active.",
+      "action": {
+        "type": "command",
+        "command": "/usr/bin/python3 /home/whole/data/src/open-company/scripts/report/log_activity.py --heartbeat",
+        "timeout": 10
+      }
+    }
+  ]
+}
