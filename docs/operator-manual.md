@@ -290,6 +290,40 @@ sha256sum factory_flash_first4MB.bin                # 先核对哈希
   ```
 - 推到远端前：把 `sifli-sdk` 子模块的 URL 改回官方地址（当前指向本地 `.git/modules`）。
 
+### 6.8 BLE 联调用的 USB 蓝牙适配器（UGREEN，需要 sudo）
+
+本机用 UGREEN 适配器（USB `2b89:8761`，芯片 RTL8761B）当 BLE central。Ubuntu 20.04 的 5.15 内核**不认这个 ID**，不打补丁时驱动不给芯片下载固件，芯片停在 ROM，扫不到任何设备。2026-11-11 做了两件事让它可用：
+
+1. **补丁版 btusb**：`~/src/btusb-2b89/`，源码取自 Ubuntu 内核 git 标签 `Ubuntu-hwe-5.15-5.15.0-139.149_20.04.1`（未打补丁时 srcversion 与原装模块一致），只在 `blacklist_table` 加一行 `2b89:8761 → BTUSB_REALTEK`（`ugreen-2b89-8761.patch`）。装在 `/lib/modules/5.15.0-139-generic/updates/btusb.ko`。
+2. **固件**：内核要的是 `rtl8761bu_fw.bin` / `rtl8761bu_config.bin`，本机 linux-firmware 包里没有，从 linux-firmware 上游下载后手工放进 `/lib/firmware/rtl_bt/`。
+
+检查是否正常：
+```bash
+modinfo -F srcversion btusb                 # 15CF02527CA99AE214C3561 = 补丁版
+sudo dmesg | grep -i "RTL" | tail -4         # 应有 loading rtl8761bu_fw.bin 和 fw version 0x...
+hciconfig hci0 version                       # Subversion 不是 0x8761 就说明固件已加载
+```
+
+**内核升级后适配器会失效**（新内核用回原版 btusb）。用新内核的源码重做：
+```bash
+cd ~/src/btusb-2b89
+K=$(uname -r)                                 # 例如 5.15.0-140-generic
+# 标签名按 /proc/version_signature 写，形如 Ubuntu-hwe-5.15-5.15.0-140.150_20.04.1
+T="Ubuntu-hwe-5.15-<版本>_20.04.1"
+B="https://git.launchpad.net/~ubuntu-kernel/ubuntu/+source/linux/+git/focal/plain/drivers/bluetooth"
+for f in btusb.c btintel.h btbcm.h btrtl.h; do curl -fsS -o $f "$B/$f?h=$T"; done
+make -C /lib/modules/$K/build M=$PWD modules && modinfo -F srcversion ./btusb.ko   # 先确认与 modinfo -F srcversion btusb 相同
+patch -p0 btusb.c < ugreen-2b89-8761.patch && make -C /lib/modules/$K/build M=$PWD modules
+sudo install -D -m 644 btusb.ko /lib/modules/$K/updates/btusb.ko && sudo depmod -a
+sudo modprobe -r btusb && sudo modprobe btusb
+```
+
+撤回（恢复原版驱动，固件文件留着无害）：
+```bash
+sudo rm /lib/modules/$(uname -r)/updates/btusb.ko && sudo depmod -a
+sudo modprobe -r btusb && sudo modprobe btusb
+```
+
 ---
 
 ## 7. 常见故障

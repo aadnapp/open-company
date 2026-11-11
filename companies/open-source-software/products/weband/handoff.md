@@ -18,14 +18,17 @@
 - 远端：`origin` = `git@github.com:aadnapp/weband.git`（私有）。2026-11-10 已推送 `main`，远端与本地同为 `a6f1c46`。
 
 - M2 开工（2026-11-11）：worktree `/home/whole/data/reawork/weband/.worktrees/m2-ble-protocol`，分支 `m2-ble-protocol`（基于 main `bb4ca8d`）。提交 `00efbb7`：把我们早先 refboard 示例的协议核心（mb_proto / mb_frame / mb_hmac）和主机单测移到 `app/`，`make -C app/test/host check` 72/72 通过。GATT / 存储 / 平台胶水（原 b2074d76）尚未移植。
-- 两仓 2026-11-11 已提交未推送：Weband `417c254`、`bb4ca8d`；open-company `40a140c`、`878d003`。
+- **M2 已完成（2026-11-11）**：已快进合入 Weband `main` 并推送（`dba20aa`），worktree 与分支已清理。协议按 V1 对齐（只核对 M2 命令），主机单测 75/75；真机 BLE 联调 `scripts/ble_m2_check.py --reboot --unpair` 17/17：pair → auth → ok、未认证 arm_ota 回 auth_required、认证后 armed、令牌跨复位有效、远程 unpair。修了两处上板问题：TRNG 未播种导致 rng_error；BlueZ 的 Just Works 需要 agent 授权（脚本自带 D-Bus agent）。板上现跑 M2 固件，处于开放模式（未配对）。
+- 联调用 UGREEN 蓝牙适配器（RTL8761B），靠补丁版 btusb + 手工放的 rtl8761bu 固件才能用，见操作手册 6.8；换内核要重做。
+- 两仓 2026-11-11 均已推送：Weband `origin/main` = `dba20aa`；open-company `fork/main`。
 
 ## 等待项（等人）
 1. 采购 P1 外设（见 `goal.md`），不阻塞 P0。按 V1：麦已有（3037 模拟麦）；缺 JDI387A 圆屏 + 转接。充电要换锂电版芯片的板子（如 SF32LB52-DevKit-LCD）+ 锂电池，是否购买待用户决定。不再需要 PDM 麦、JD7601、LGS4056。
-2. M2 两个待定：① 线协议对齐 V1 1.15.35（字段更多，需再逆向）还是沿用现有按 V2 写的核心；② BLE 联调用什么当 central（本机无蓝牙适配器：手机 + nRF Connect，或买 USB 蓝牙适配器 + bleak 脚本）。
+2. 下一个里程碑待用户选：M3 固件（VAD + Opus 录音，外设已齐）、M4（缺 JDI 圆屏；充电在 Nano 上 blocked）、M5（OTA / DFU）。
 
 ## 下一步
-- M2（BLE 控制协议）在独立 worktree 开工：先写主机单测，再上板联调 `pair → auth → ok`。
+- 等用户选下一个里程碑（见等待项 2），在独立 worktree 开工。
+- 复测 M2：板上已是 M2 固件且处于开放模式，`python3.10 scripts/ble_m2_check.py --reboot --unpair`（需 UGREEN 适配器，见操作手册 6.8）。
 
 ## 证据索引
 - 每步实测记录：`/home/whole/data/reawork/weband/evidence/digest.md`
