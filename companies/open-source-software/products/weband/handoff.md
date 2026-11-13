@@ -1,8 +1,15 @@
 # Weband 交接记录
 
-最近更新：2026-11-10
+最近更新：2026-11-13
 
 ## 现状
+- **M3 录音收尾（2026-11-13）**：worktree `/home/whole/data/reawork/weband/.worktrees/m3-recording`，分支 `m3-recording` @ `008b597`（未推送、未合入 main）。板上跑 `main.bin` `5c0c03cf…0fd9`，处于开放模式（未配对）。
+  - 录音：WebRTC VAD 门控（余量 8 dB、触发 6 帧）+ Opus SILK 16 kHz 24 kbit/s，60 s 一段写 `/weband/rec/NNNNNN.ogg`。
+  - 存储：已用超过 2/3 开始裁剪（用户定），先删已传到手机的（`ACKED.txt`），再删最旧的，删到剩余 1/3 + 256 KB；5 分钟 fsync（用户定）；开机删空文件。实测：先删 9 个已 ACK、再删 3 个最旧，丢帧 0。
+  - BLE 传录音：按原版 App 1.3.1 的 `ready` / `ack` + MBF1 帧实现。台架脚本 `scripts/ble_pull_check.py` 实测：基本拉取、丢块重传、断线续传都通过，206 个积压文件一次拉完 829/829。
+  - 鉴权改为与原版 App 一致：`{"type":"auth","mac"}`，key 为令牌 hex 解码的 16 字节（M2 原实现与 App 不兼容）。
+  - 上板修过的问题：main 线程栈 2 KB 溢出（改 8 KB，开机裁剪移到录音线程）；这次崩溃把 fs_region 的 rec 目录扇区擦成 0xFF，已在主机上重建元数据写回（旧测试录音丢失，有用的早已取回）。
+  - 敲击测试未达标：敲击 1 分钟开 4 段；拉长触发到 12 帧仍有 2 段。用户决定 M3 先收尾，单独立项。夜里 22:00–07:00 无人时只开 3 段。
 - **对标改为 refdevice V1 圆屏**（2026-11-10 用户决定）。依据：V1 固件 `1.15.35-v1-round-serial`（板级 `sf32lb52-refboard-v1`）字符串里有 30 处 audcodec/audprc、0 处 PDM，显示为 `jdi387a`，充电走片内 PMU；V2 固件 `2.15.12` 则是 22 处 PDM、0 处 audcodec、JD7601、LGS4056。V1 原理图（`/home/whole/share/mic_imu.webp`）的模拟麦 `MIC_BIAS`/`MIC_ADC` 与 V1 固件一致。此前文档里的"PDM 麦"只适用于 V2。
   - 已更新：`AGENTS.md`、`goal.md`、Weband 仓库 `docs/hardware-inventory.md`（第 2 节改为 V1 外设，V2 移到 2b，待核实项 C5）、`firmware-port.md` 资料入口。Weband 仓库的改动尚未提交。
   - 原 `refboard-v2/design.md` 是 V2 设计，外设部分不再适用。
@@ -12,26 +19,29 @@
   - 分区表核对：16 MB NOR 原样放下 refdevice 布局，不重排。
   - 外设清点 `docs/hardware-inventory.md`；真机核对：LED（PA31/PA32）低电平点亮，KEY1=PA34、KEY2=PA33 按下为高。
   - weband 版已烧录上板：三区回读一致，串口启动、`Hello world!`、`msh />` 正常。
-- 板上当前运行的是 `sf32lb52-weband` 版 hello_world。
 
 - 首次提交已完成（2026-11-10）：`main` @ `a6f1c46`（两个提交已合并为一个），38 个文件；SDK、Flash 镜像、板图不入库。
 - 远端：`origin` = `git@github.com:aadnapp/weband.git`（私有）。2026-11-10 已推送 `main`，远端与本地同为 `a6f1c46`。
 
 - M2 开工（2026-11-11）：worktree `/home/whole/data/reawork/weband/.worktrees/m2-ble-protocol`，分支 `m2-ble-protocol`（基于 main `bb4ca8d`）。提交 `00efbb7`：把我们早先 refboard 示例的协议核心（mb_proto / mb_frame / mb_hmac）和主机单测移到 `app/`，`make -C app/test/host check` 72/72 通过。GATT / 存储 / 平台胶水（原 b2074d76）尚未移植。
-- **M2 已完成（2026-11-11）**：已快进合入 Weband `main` 并推送（`dba20aa`），worktree 与分支已清理。协议按 V1 对齐（只核对 M2 命令），主机单测 75/75；真机 BLE 联调 `scripts/ble_m2_check.py --reboot --unpair` 17/17：pair → auth → ok、未认证 arm_ota 回 auth_required、认证后 armed、令牌跨复位有效、远程 unpair。修了两处上板问题：TRNG 未播种导致 rng_error；BlueZ 的 Just Works 需要 agent 授权（脚本自带 D-Bus agent）。板上现跑 M2 固件，处于开放模式（未配对）。
+- **M2 已完成（2026-11-11）**：已快进合入 Weband `main` 并推送（`dba20aa`），worktree 与分支已清理。协议按 V1 对齐（只核对 M2 命令），主机单测 75/75；真机 BLE 联调 `scripts/ble_m2_check.py --reboot --unpair` 17/17：pair → auth → ok、未认证 arm_ota 回 auth_required、认证后 armed、令牌跨复位有效、远程 unpair。修了两处上板问题：TRNG 未播种导致 rng_error；BlueZ 的 Just Works 需要 agent 授权（脚本自带 D-Bus agent）。（板上现在跑的是 M3 固件，见上。）
 - 联调用 UGREEN 蓝牙适配器（RTL8761B），靠补丁版 btusb + 手工放的 rtl8761bu 固件才能用，见操作手册 6.8；换内核要重做。
 - 两仓 2026-11-11 均已推送：Weband `origin/main` = `dba20aa`；open-company `fork/main`。
 
 ## 等待项（等人）
 1. 采购 P1 外设（见 `goal.md`），不阻塞 P0。按 V1：麦已有（3037 模拟麦）；缺 JDI387A 圆屏 + 转接。充电要换锂电版芯片的板子（如 SF32LB52-DevKit-LCD）+ 锂电池，是否购买待用户决定。不再需要 PDM 麦、JD7601、LGS4056。
-2. 下一个里程碑待用户选：M3 固件（VAD + Opus 录音，外设已齐）、M4（缺 JDI 圆屏；充电在 Nano 上 blocked）、M5（OTA / DFU）。
+2. 用户确认：`m3-recording` 合入 Weband `main` 并推送。
+3. 用户决定：录音存储掉电安全方案（NOR 上 FAT 改目录时掉电丢整个目录）是否排期。
 
 ## 下一步
-- 等用户选下一个里程碑（见等待项 2），在独立 worktree 开工。
-- 复测 M2：板上已是 M2 固件且处于开放模式，`python3.10 scripts/ble_m2_check.py --reboot --unpair`（需 UGREEN 适配器，见操作手册 6.8）。
+- 合入 M3 后清理 worktree 与分支。
+- 新工作项「门控误触发」：独立 worktree；方向是较长窗口内的说话帧比例、或排除骤起骤落的帧；用 `evidence/m3_knock/knocks_concat.wav` 与说话录音 950 / 806 在 `rec_sim` 里量化，再上板复测敲击。
+- 然后 M5（OTA / DFU）。
+- M3 记的 TODO(weband)：文件名 `.ogg` 与 V1 按小时 `.opus`（App 用 月.日.时 取开始时间）；`file_start` 未发 `start_ts` 等字段；`response` 别名；V1 的 VAD 设置持久化。
 
 ## 证据索引
-- 每步实测记录：`/home/whole/data/reawork/weband/evidence/digest.md`
+- 每步实测记录：`/home/whole/data/reawork/weband/evidence/digest.md`（M3 期间在 worktree 里：`.worktrees/m3-recording/evidence/digest.md`）
+- M3：`evidence/m3_night`、`m3_morning`、`m3_speech*`（门控调参）、`m3_xfer`（BLE 传输、fs 修复）、`m3_knock`（敲击测试、夜间分时统计）
 - 构建日志：`evidence/build_nano_n16r16.log`、`evidence/build_weband.log`
 - 烧录与回读：M0 `flash_hello_world.log` / `flash_readback.txt`；M1 `flash_weband.log` / `flash_readback_weband.txt`
 - 串口：`evidence/hello_world_boot_1000000.log`、`evidence/weband_boot_1000000.log`、`evidence/key_monitor.log`

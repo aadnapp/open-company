@@ -19,7 +19,7 @@
 | 从上游 `munk-sh/open-company` 同步 | **人工**，按 4 节「上游同步（人工）」的 git 步骤 | 按需 |
 | 晚间盘点 `daily-patrol` | cron 自动，调用 Kiro CLI | 每天 21:00 |
 | 角色 digest + 图形化报告 | cron 自动，纯本地，不联网 | 每小时第 7 分钟 |
-| IDE 会话活动记录 | Agent 按 steering 规则记一句话；Stop hook 自动记心跳 | 每轮回复 |
+| IDE 会话活动记录 | Agent 按 steering 规则记一句话；Stop hook 自动记心跳与对话原文 | 每轮回复 |
 | Weband 构建、烧录、上板验证 | **人工触发**，需要开发板在线 | 按需 |
 | 推 tag、发 Release、GitHub 回帖关单、烧录、提交代码 | **必须人确认** | — |
 
@@ -36,6 +36,9 @@ xdg-open ~/.local/state/open-company/report/index.html
 
 # 今天的活动日志（IDE 会话记的进展 + Stop hook 心跳），一行一条 JSON
 cat ~/.local/state/open-company/activity/$(date +%F).jsonl
+
+# 今天的对话原文（用户发的话 + Agent 实际说的话，不含工具调用/推理），一行一条 JSON
+cat ~/.local/state/open-company/chat/$(date +%F).jsonl
 
 # 今天每个角色的 digest
 ls ~/.local/state/open-company/digests/$(date +%F)/
@@ -57,10 +60,11 @@ cd /home/whole/data/src/open-company/scripts/report && python3 build_digests.py 
 
 ### IDE 会话怎么进报告
 
-IDE 对话本身不进报告，只有写进活动日志的才看得到：
+角色概览、今日活动和时间线靠活动日志；对话原文靠对话日志，两者都由 Stop hook 自动写，不用 Agent 额外操作：
 - **一句话进展**：Agent 按 `.kiro/steering/activity-log.md` 调用 `scripts/report/log_activity.py --role <角色> --kind <start|progress|done|blocked|waiting> "<一句话>"`。角色只接受报告里登记过的（`build_report.py` 的 `ROLES` 与 `MANUAL_ROLES`），写错会报错。人也可以手动记一条。
 - **会话心跳**：`.kiro/hooks/activity-heartbeat.json`（Stop 触发）每轮回复结束调用 `log_activity.py --heartbeat`，同一工作区 10 分钟内只记一次，只记时间、工作区和 hook 输入的字段名，不记内容。心跳不区分角色。
-- 卡片上出现「IDE 会话最近活动…，此后没有记录进展」，说明会话在干活但没记进展，回头补记或提醒 Agent。
+- **对话原文**：同一个 Stop hook 还会调用 `scripts/report/capture_chat.py`，从 Kiro 会话记录（`~/.kiro/sessions/`）里摘取这轮新增的用户发言和 Agent 的实际回复文字（不含工具调用、推理过程、附件内容），按常见密钥/口令模式做粗略脱敏后写入 `~/.local/state/open-company/chat/<日期>.jsonl`；只采集工作区属于本仓库或 Weband 仓库的会话（`capture_chat.py` 的 `WORKSPACES`），避免混入这台机器上其它项目的对话。报告的「今日对话记录」小节按时间倒序展示。
+- 卡片上出现「IDE 会话最近活动…，此后没有记录进展」，说明会话在干活但没记一句话进展，回头补记或提醒 Agent；对话原文小节不受此影响，始终自动记录。
 - 新增手动角色：在 `build_report.py` 的 `MANUAL_ROLES` 加一行（角色、产品、证据 digest 路径或 `None`），再在 `build_digests.py` 的 `slug()` 给它一个文件名，并同步更新 `activity-log.md` 的角色列表。
 
 产品进度以产品目录下的两份文件为准，**里程碑或等待项变化时要更新**（晚间盘点超过 3 天没更新会列入督办）：
@@ -324,6 +328,34 @@ sudo rm /lib/modules/$(uname -r)/updates/btusb.ko && sudo depmod -a
 sudo modprobe -r btusb && sudo modprobe btusb
 ```
 
+### 6.9 录音（M3）：取回、BLE 拉取、录音区修复
+
+录音存在 fs_region（FAT，4 MB，`0x128A0000`）的 `/weband/rec/NNNNNN.ogg`。已用超过 2/3 时固件自动裁剪：先删手机已确认的（`ACKED.txt`），再删最旧的。
+
+- **串口命令**：`rec`（状态：段数、底噪、门槛、剩余空间）、`rec ls`、`rec idea on|off`（原样连续录，测试用）、`rec clear`（一次删几百个文件会卡约 45 s 并丢音频，少用）。
+- **关串口会复位板子**（CH340 RTS 接复位），正在录的那段会丢。连续测试时用常驻进程占着串口，命令写进 FIFO：
+  ```bash
+  cd /home/whole/data/reawork/weband          # 或 M3 的 worktree
+  python3 scripts/console_daemon.py <日志> /tmp/weband_con.fifo &
+  echo "rec" > /tmp/weband_con.fifo
+  echo "__quit__" > /tmp/weband_con.fifo      # 停止（会复位板子）
+  ```
+  刚烧录完第一次打开时偶尔收不到数据：发一条 `rec`，没回应就停掉重开。
+- **经 BLE 拉取（不复位板子，和原版 App 1.3.1 走同一协议）**：要 6.8 的 UGREEN 适配器；板子未配对时直接用，已配对时加 `--token <令牌hex>`。
+  ```bash
+  python3.10 scripts/ble_pull_check.py <输出目录>                    # 拉完所有未确认的文件，逐个校验大小/CRC 并用 ffmpeg 解码
+  python3.10 scripts/ble_pull_check.py <输出目录> --drop-seq 40      # 故意丢一块，测重传
+  python3.10 scripts/ble_pull_check.py <输出目录> --cut-after 20000  # 中途断线，测续传
+  ```
+  拉完的文件在板上记为已确认，存满时优先被删。实测约 47 KB/s。
+- **经下载口整区读出**（会复位板子，先停掉 console_daemon）：`scripts/pull_recordings.sh <输出目录>`，用 mtools 取文件、ffmpeg 解码。
+- **录音区损坏的修复**（2026-11-12 实际做过一次）。现象：`ls /weband/rec` 列出一串 `BAD file: ?`，`df` 显示 0 空闲。这会覆盖整个录音区，原有录音全部丢失，先问负责人。
+  1. 用 `pull_recordings.sh` 或 `sftool read_flash <img>@0x128A0000:4194304` 先只读备份整区，`fsck.fat -n <img>` 看坏在哪。
+  2. `fsck.fat -a` 清不掉 0xFF 的目录项时，在主机上重建：保留原引导扇区，清零 FAT 和根目录（FAT12 头 3 字节为 `F8 FF FF`），`mmd ::/weband ::/weband/rec`，再 `fsck.fat -n` 必须干净。注意 `/weband/pair.token`（配对令牌）也在这个区，若存在要先用 `mcopy` 取出、重建后放回。
+  3. `sftool ... write_flash --verify <img>@0x128A0000`，再整区读回比对 SHA-256，开机看 `df` 和 `rec`。
+  步骤记录在 Weband `evidence/digest.md`（2026-11-12「fs_region 修复」）和 `evidence/m3_xfer/fs_corrupt/`。
+- **已知风险**：NOR 上的 FAT 改目录时（删文件、建文件）如果掉电或复位，整个目录可能丢失，不只是正在写的那一段。掉电安全方案待定。
+
 ---
 
 ## 7. 常见故障
@@ -332,6 +364,8 @@ sudo modprobe -r btusb && sudo modprobe btusb
 |---|---|---|
 | 串口回车没反应 | 用了 `screen`，RTS 把芯片按在复位里 | 改用 6.4 的 miniterm 命令；`screen -ls` 清掉残留会话 |
 | `Device or resource busy` | 串口被别的程序占用 | `fuser -v /dev/ttyUSB0` 找到进程，先正常退出它 |
+| 开机日志 `hard fault on thread: main` / `STKOF` | 线程栈不够（2026-11-12：main 线程 2 KB，开机裁剪时溢出） | 看故障转储里哪个线程 100%，加大栈（main 在 `proj.conf` 的 `CONFIG_RT_MAIN_THREAD_STACK_SIZE`）；重的活放到大栈线程 |
+| `storage low, segment not opened` 刷屏、`rec` 显示 free=0 | 录音区满且裁剪删不掉文件，多半是目录已坏 | 见 6.9「录音区损坏的修复」 |
 | 出现 `msh />msh />` | 用了 `--eol CRLF` | 改成 `--eol CR` |
 | 命令被截断、`command not found` | 一次粘贴了多行 | 一条一条打 |
 | guard 返回 1 但其实没检查 | 系统 node v10 跑不了 ES module，或没装 `gh` | 确认 env 里 `NODE_DIR` 正确；`run-task.sh` 会先检查，不满足时以 127 退出 |
