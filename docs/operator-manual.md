@@ -293,6 +293,16 @@ sha256sum factory_flash_first4MB.bin                # 先核对哈希
   git -C /home/whole/data/reawork/weband worktree add .worktrees/<名字> -b <分支名> main
   ```
 - 推到远端前：把 `sifli-sdk` 子模块的 URL 改回官方地址（当前指向本地 `.git/modules`）。
+- **参考设备的名称和相关标识不进远端**（2026-11-13 用户要求，两仓历史已于当天改写并强推：Weband `origin/main` `008b597`→`bcb389a`，open-company `fork/main` `df29ded`→`db25849`）：
+  - 本机资料目录用中性别名 `/home/whole/data/reawork/refdevice`、`refdevice-v1`、`refdevice-files/`（都是符号链接；真名与来源只记在本机 `refdevice-files/SOURCES.txt`）。文档、代码注释、提交说明一律写「参考设备」、`sf32lb52-refboard-v1`、"App 的 BLE 同步类"这类中性写法。
+  - 两个仓库都装了本地 git hook，拦截含这些标识的提交内容、提交说明和推送（`--no-verify` 跳过提交检查的，推送时仍会被拦）。hook 不在仓库里，**新 clone 后要重装**：
+    ```bash
+    G=/home/whole/data/reawork/refdevice-files/name_guard.sh
+    for n in pre-commit commit-msg pre-push; do ln -sfn $G <仓库>/.git/hooks/$n; done
+    ```
+  - 改写前的完整备份：`refdevice-files/backups-2026-11-13/`（两仓 `*.bundle`、ref 列表、旧→新 SHA 对照 `sha-map.txt`）。要恢复旧远端：`git clone <bundle>` 后 `git push --force origin main`（会把旧名字带回远端，非必要不要做）。
+  - 改写工具 `refdevice-files/scrub.py`（`git filter-branch --tree-filter "python3 scrub.py tree" --msg-filter "python3 scrub.py msg"`），以后如再发现漏网的标识，按同样做法处理并重新核对。
+  - GitHub 上旧提交页面可能在一段时间内仍能按旧 SHA 打开；要彻底清除需联系 GitHub 支持。
 
 ### 6.8 BLE 联调用的 USB 蓝牙适配器（UGREEN，需要 sudo）
 
