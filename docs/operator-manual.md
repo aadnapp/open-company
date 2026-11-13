@@ -366,6 +366,18 @@ sudo modprobe -r btusb && sudo modprobe btusb
   步骤记录在 Weband `evidence/digest.md`（2026-11-12「fs_region 修复」）和 `evidence/m3_xfer/fs_corrupt/`。
 - **已知风险**：NOR 上的 FAT 改目录时（删文件、建文件）如果掉电或复位，整个目录可能丢失，不只是正在写的那一段。掉电安全方案待定。
 
+### 6.9b 电源键（M4，KEY1 = PA34，按下为高）
+
+| 操作 | 板子做什么 |
+|---|---|
+| 单击 | 开始/结束一段灵感录音（不过门控、单独成段），到时自动结束：默认 60 s，App 可用 `{"type":"idea_config","timeout_s":10..600}` 设置，`{"type":"idea_toggle"}` 也能开关 |
+| 双击 | 重新配对：删配对令牌、清 BLE 绑定、重启；正在录灵感时等这段结束再做 |
+| 长按 6 s | 重启（有挂起的重新配对会先做）。Nano 上按住 10 s 是硬件复位 |
+
+- 按得太短（< 40 ms）不算单击；开机时按着的键要先松开才识别。
+- **双击清了板子的 BLE 绑定后，手机/电脑上的旧绑定要手动删**（手机"忽略此设备"，本机 `bluetoothctl remove 5C:FD:52:70:01:87`），否则加密会被板子拒绝、连不上。
+- 台架脚本已改为"在同一次扫描里发现并连接"（`ble_m2_check.py` 的 `connect_live`），因为 Ubuntu 20.04 的 BlueZ 在扫描停止时会删掉未绑定设备的对象。
+
 ### 6.10 固件 OTA（M5，经 BLE）
 
 走 SiFli SDK 自带的离线包 DFU（与参考设备 V1 同一条路）：手机经 SiFli 串口传输服务（UUID `00000000-0000-0000-6473-5f696c666973`）发包，板子存进 `dfu_download_region`（0x780000，1152 KB），重启进 `dfu.bin`（0x720000）安装，再重启进新固件。安装中掉电，bootloader 会按 flash 里的安装标记续装（按源码推断，未实测）。

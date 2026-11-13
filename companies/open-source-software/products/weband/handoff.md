@@ -1,8 +1,14 @@
 # Weband 交接记录
 
-最近更新：2026-11-13（M5 合入）
+最近更新：2026-11-13（M4 电源键合入）
 
 ## 现状
+- **M4 电源键部分：已完成（2026-11-13）**，已快进合入 Weband `main` 并推送（`origin/main` = `f1de797`），worktree 与分支已清理，不入库的镜像与升级包已移到主仓 `evidence/m4/`。板上跑 build 3（BLE OTA 装上），开放模式。证据：Weband `evidence/digest.md` 2026-11-13 M4 一节、`evidence/m4/`。
+  - 单击灵感（默认 60 s，`idea_toggle` / `idea_config` 按 V1）、双击重新配对（清令牌和 BLE 绑定后重启，录灵感时延后）、长按 6 s 重启、延后遇长按先解绑，都已实测。
+  - 实测中修了两处：延后的重新配对会被长按重启丢掉；全新配对后第一次连接 App 层配对被拒（SDK 不发加密事件）。
+  - 台架脚本连接改为 `connect_live`（老 BlueZ 扫描停止即删未绑定设备）。
+  - V1 原理图：电源键 PA34 高有效（SKRTLAE010）；无蜂鸣器；SD NAND 走 SPI，接 PA24/25/28/29，Nano J1 有这四个脚。
+  - 待用户决定：无屏时原版 App 的输码配对对真实用户走不通（App 不用 button_confirm）。
 - **硬件范围（2026-11-13）**：对标 V1，但 **Weband 不要屏幕**。V1 器件按其开源硬件页更新：SF32LB525UC6、128 MB SD NAND 存录音、16 MB SPI NOR、502525 电池、IMU 在板但固件不用。M4 改为只做电源（电源键 + 充电）。
 - **M3 录音已完成（2026-11-13）**：已快进合入 Weband `main` 并推送（`origin/main` = `97ec141`），worktree 与分支已清理；工作树外的录音文件（`.ogg` / `.wav` / `fs_region.img`，不入库）已移到主仓 `evidence/` 下。板上跑 `main.bin` `5c0c03cf…0fd9`，处于开放模式（未配对）。
   - 录音：WebRTC VAD 门控（余量 8 dB、触发 6 帧）+ Opus SILK 16 kHz 24 kbit/s，60 s 一段写 `/weband/rec/NNNNNN.ogg`。
