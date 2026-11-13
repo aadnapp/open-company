@@ -4,7 +4,7 @@
 
 ## 现状
 - **硬件范围（2026-11-13）**：对标 V1，但 **Weband 不要屏幕**。V1 器件按其开源硬件页更新：SF32LB525UC6、128 MB SD NAND 存录音、16 MB SPI NOR、502525 电池、IMU 在板但固件不用。M4 改为只做电源（电源键 + 充电）。
-- **M3 录音已完成（2026-11-13）**：已快进合入 Weband `main` 并推送（`origin/main` = `008b597`），worktree 与分支已清理；工作树外的录音文件（`.ogg` / `.wav` / `fs_region.img`，不入库）已移到主仓 `evidence/` 下。板上跑 `main.bin` `5c0c03cf…0fd9`，处于开放模式（未配对）。
+- **M3 录音已完成（2026-11-13）**：已快进合入 Weband `main` 并推送（`origin/main` = `97ec141`），worktree 与分支已清理；工作树外的录音文件（`.ogg` / `.wav` / `fs_region.img`，不入库）已移到主仓 `evidence/` 下。板上跑 `main.bin` `5c0c03cf…0fd9`，处于开放模式（未配对）。
   - 录音：WebRTC VAD 门控（余量 8 dB、触发 6 帧）+ Opus SILK 16 kHz 24 kbit/s，60 s 一段写 `/weband/rec/NNNNNN.ogg`。
   - 存储：已用超过 2/3 开始裁剪（用户定），先删已传到手机的（`ACKED.txt`），再删最旧的，删到剩余 1/3 + 256 KB；5 分钟 fsync（用户定）；开机删空文件。实测：先删 9 个已 ACK、再删 3 个最旧，丢帧 0。
   - BLE 传录音：按原版 App 1.3.1 的 `ready` / `ack` + MBF1 帧实现。台架脚本 `scripts/ble_pull_check.py` 实测：基本拉取、丢块重传、断线续传都通过，206 个积压文件一次拉完 829/829。
@@ -24,10 +24,10 @@
 - 首次提交已完成（2026-11-10）：`main` @ `a6f1c46`（两个提交已合并为一个），38 个文件；SDK、Flash 镜像、板图不入库。
 - 远端：`origin` = `git@github.com:aadnapp/weband.git`（私有）。2026-11-10 已推送 `main`，远端与本地同为 `a6f1c46`。
 
-- M2 开工（2026-11-11）：worktree `/home/whole/data/reawork/weband/.worktrees/m2-ble-protocol`，分支 `m2-ble-protocol`（基于 main `bb4ca8d`）。提交 `00efbb7`：把我们早先示例的协议核心（mb_proto / mb_frame / mb_hmac）和主机单测移到 `app/`，`make -C app/test/host check` 72/72 通过。GATT / 存储 / 平台胶水（原 b2074d76）尚未移植。
-- **M2 已完成（2026-11-11）**：已快进合入 Weband `main` 并推送（`dba20aa`），worktree 与分支已清理。协议按 V1 对齐（只核对 M2 命令），主机单测 75/75；真机 BLE 联调 `scripts/ble_m2_check.py --reboot --unpair` 17/17：pair → auth → ok、未认证 arm_ota 回 auth_required、认证后 armed、令牌跨复位有效、远程 unpair。修了两处上板问题：TRNG 未播种导致 rng_error；BlueZ 的 Just Works 需要 agent 授权（脚本自带 D-Bus agent）。（板上现在跑的是 M3 固件，见上。）
+- M2 开工（2026-11-11）：worktree `/home/whole/data/reawork/weband/.worktrees/m2-ble-protocol`，分支 `m2-ble-protocol`（基于 main `606e0fa`）。提交 `5998086`：把我们早先示例的协议核心（mb_proto / mb_frame / mb_hmac）和主机单测移到 `app/`，`make -C app/test/host check` 72/72 通过。GATT / 存储 / 平台胶水（原 b2074d76）尚未移植。
+- **M2 已完成（2026-11-11）**：已快进合入 Weband `main` 并推送（`37fcb56`），worktree 与分支已清理。协议按 V1 对齐（只核对 M2 命令），主机单测 75/75；真机 BLE 联调 `scripts/ble_m2_check.py --reboot --unpair` 17/17：pair → auth → ok、未认证 arm_ota 回 auth_required、认证后 armed、令牌跨复位有效、远程 unpair。修了两处上板问题：TRNG 未播种导致 rng_error；BlueZ 的 Just Works 需要 agent 授权（脚本自带 D-Bus agent）。（板上现在跑的是 M3 固件，见上。）
 - 联调用 UGREEN 蓝牙适配器（RTL8761B），靠补丁版 btusb + 手工放的 rtl8761bu 固件才能用，见操作手册 6.8；换内核要重做。
-- 两仓 2026-11-11 均已推送：Weband `origin/main` = `dba20aa`；open-company `fork/main`。
+- 两仓 2026-11-11 均已推送：Weband `origin/main` = `37fcb56`；open-company `fork/main`。
 
 ## 等待项（等人）
 1. 采购 P1 外设（见 `goal.md`），不阻塞 P0。按 V1、不要屏幕（2026-11-13）：麦已有（3037 模拟麦）；不再需要屏。录音存储要 SD NAND / SD 卡模块（或按 V1 开源设计打板），充电要锂电版芯片的板子 + 锂电池（V1 为 502525），是否购买或打板待用户决定。不再需要 PDM 麦、JD7601、LGS4056、JDI 屏。
