@@ -366,6 +366,31 @@ sudo modprobe -r btusb && sudo modprobe btusb
   步骤记录在 Weband `evidence/digest.md`（2026-11-12「fs_region 修复」）和 `evidence/m3_xfer/fs_corrupt/`。
 - **已知风险**：NOR 上的 FAT 改目录时（删文件、建文件）如果掉电或复位，整个目录可能丢失，不只是正在写的那一段。掉电安全方案待定。
 
+### 6.10 固件 OTA（M5，经 BLE）
+
+走 SiFli SDK 自带的离线包 DFU（与参考设备 V1 同一条路）：手机经 SiFli 串口传输服务（UUID `00000000-0000-0000-6473-5f696c666973`）发包，板子存进 `dfu_download_region`（0x780000，1152 KB），重启进 `dfu.bin`（0x720000）安装，再重启进新固件。安装中掉电，bootloader 会按 flash 里的安装标记续装（按源码推断，未实测）。
+
+- **必须先开窗**：只有已鉴权的连接发过 `{"type":"arm_ota"}`，并且在 5 分钟窗口内，板子才接收升级包。没开窗时 START 被拒（`USER_REJECT`），下载区不擦；传输中窗口过期，END 被拒、不安装。开放模式（未配对）下 `arm_ota` 也会被拒，要先配对。
+- **离线包不签名、不加密**，开窗闸门是唯一防线。不要把 `arm_ota` 的鉴权要求放宽。
+- **打包**（用 SDK 管理的 Python 环境，不改 SDK）：
+  ```bash
+  cd /home/whole/data/reawork/weband
+  scripts/make_ota_pkg.sh app/project/build_sf32lb52-weband_hcpu /tmp/weband_ota.bin            # 只含主程序
+  scripts/make_ota_pkg.sh app/project/build_sf32lb52-weband_hcpu /tmp/weband_ota.bin --with-dfu # 连安装器一起升级
+  ```
+- **台架升级**（要 6.8 的 UGREEN 适配器；串口最好由 6.9 的 console_daemon 占着，便于看板上日志）：
+  ```bash
+  python3.10 scripts/ble_ota_check.py /tmp/weband_ota.bin --pair-log <console_daemon 日志>   # 未配对：先配对（令牌只存 /tmp）
+  python3.10 scripts/ble_ota_check.py /tmp/weband_ota.bin                                   # 用上次保存的令牌
+  python3.10 scripts/ble_ota_check.py /tmp/weband_ota.bin --deny        # 不开窗，应被拒
+  python3.10 scripts/ble_ota_check.py /tmp/weband_ota.bin --cut-after 100   # 中途断线后续传
+  python3.10 scripts/ble_ota_check.py /tmp/weband_ota.bin --expire 310      # 开窗后等过期，应被拒
+  ```
+  约 11 KB/s，53 万字节的包约 46 秒。成功后板子自动重启两次，串口 `fw` 命令看构建标识；要确证，用 sftool 回读主程序区与 `output/main.bin` 比对。`ota` 命令看闸门状态（armed、剩余毫秒、接受/拒绝计数）。
+- **原版 App 不会给 Weband 推包**：它按设备状态里的 `hw` 字段挑参考设备的升级包，我们的固件不报这个字段，App 会提示"尚未确认当前设备板型"。这是有意的，防止原厂固件写进 Weband。
+- **刷坏了**：随时可以用 6.3 的 UART + sftool 重新烧录，不依赖 OTA。
+- 已知：板上 rt_tick 比真实时间慢约 1%（空闲实测），5 分钟窗口实际会长几秒。
+
 ---
 
 ## 7. 常见故障

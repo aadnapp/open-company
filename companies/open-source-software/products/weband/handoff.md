@@ -1,6 +1,6 @@
 # Weband 交接记录
 
-最近更新：2026-11-13
+最近更新：2026-11-13（M5 合入）
 
 ## 现状
 - **硬件范围（2026-11-13）**：对标 V1，但 **Weband 不要屏幕**。V1 器件按其开源硬件页更新：SF32LB525UC6、128 MB SD NAND 存录音、16 MB SPI NOR、502525 电池、IMU 在板但固件不用。M4 改为只做电源（电源键 + 充电）。
@@ -36,7 +36,10 @@
 3. 用户决定：录音存储掉电安全方案（NOR 上 FAT 改目录时掉电丢整个目录）是否排期。
 
 ## 下一步
-- **M5 OTA / DFU（调研完成，2026-11-13，待用户定 3 个问题后开工）**：
+- **M5 OTA / DFU：已完成（2026-11-13）**，已快进合入 Weband `main` 并推送（`origin/main` = `4ccce97`），worktree 与分支已清理；不入库的镜像、升级包与拉回的录音已移到主仓 `evidence/m5/`。板上跑最终版 `main.bin` `d706c012…`（构建 `Nov 13 2026 14:00:44`，经 BLE OTA 装上），开放模式。证据：Weband `evidence/digest.md` 2026-11-13 M5 一节、`evidence/m5/`。
+  - 结果：不开窗被拒 5/5；A→B 11/11；断线续传 9/9；C→最终版 8/8（46 s，11.2 KB/s）；OTA 后回读主程序区与最终版逐字节一致；开窗过期被拒 6/6；OTA 后拉录音 17/17；配对跨三次 OTA 保持。
+  - 记的 TODO：不上报 `hw` / `fw_version`；离线包不签名，只靠 arm_ota 闸门；板上 rt_tick 慢约 1%；安装器有两条告警（结果正常，未深究）；安装中掉电续装未实测。
+- （以下为开工前的调研记录）
   - V1 用 SiFli SDK 自带的 BLE DFU（`dfu_ctrl` / `ble_dfu`，固件字符串），走 SiFli 串口传输服务（App 里服务 UUID `00000000-0000-0000-6473-5f696c666973`）；App 自己实现 SiFli DFU 协议（START_REQ / PACKET / END_RSP）。V1 另加了一道：`dfu install denied: not armed by authenticated peer`，即 M2 的 `arm_ota` 窗口；OTA 前封口录音（`OTA recorder seal`）。
   - 我们的分区已就位：`dfu_flash_code` 0x720000（384 KB）、`dfu_download_region` 0x780000（1152 KB）。SDK 打包工具有 Python 版（`tools/secureboot/imgtoolv37.py`、`dfu_bin_generate37.py`），Linux 可用。M5 不缺硬件；刷坏了可以随时用 UART + sftool 恢复。
   - 待定：① App 按板型从自带资源里挑 OTA 包，并比较版本号；如果认成参考设备的板型，会把原厂固件推给我们（违反"不刷原厂镜像"）。设备上报什么板型 / 版本，需要定。② 签名密钥：开发阶段用 SDK 默认密钥，量产前换自有密钥（记 TODO）。③ 台架 OTA 工具：自己写 bleak 脚本走同一协议（与 `ble_pull_check.py` 同思路）。
