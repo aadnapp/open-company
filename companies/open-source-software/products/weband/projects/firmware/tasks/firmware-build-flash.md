@@ -19,6 +19,6 @@ period: day
 6. 收口：digest 末尾写总判定（通过 / 失败 / blocked）、各产物哈希、烧录与串口日志路径。
 
 硬约束：
-- 不烧录 refdevice 原厂 `main.bin`、`dfu.bin` 等镜像，也不改 `ftab` / bootloader 地址。
+- 不烧录参考设备原厂 `main.bin`、`dfu.bin` 等镜像，也不改 `ftab` / bootloader 地址。
 - 同一个失败最多重试 2 次，之后写出根因并停手。
 - 编译产物和日志放在工作目录，不写进 `/home/whole/data/reawork/refdevice`。

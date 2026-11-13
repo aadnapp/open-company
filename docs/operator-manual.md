@@ -225,7 +225,7 @@ scripts/build.sh <工程目录> sf32lb52-weband          # 编其它 SCons 工�
    ```
 4. 把烧录日志、哈希和回读结果追加到 `evidence/digest.md`。
 
-禁止事项：不烧 refdevice 原厂镜像（`main.bin`、`dfu.bin`、`ftab.bin`、`bootloader.bin`）；不改 `ftab` 和 bootloader 地址。
+禁止事项：不烧参考设备原厂镜像（`main.bin`、`dfu.bin`、`ftab.bin`、`bootloader.bin`）；不改 `ftab` 和 bootloader 地址。
 
 ### 6.4 串口
 

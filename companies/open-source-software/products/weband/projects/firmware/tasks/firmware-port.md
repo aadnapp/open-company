@@ -5,8 +5,8 @@ period: day
 按本场 brief 指定的**一个**里程碑（M1–M5，定义见产品 `AGENTS.md`）移植功能。brief 必须给出：里程碑编号、目标板名、要实现的具体行为。缺任何一项就停下来问。
 
 资料入口（只读，`/home/whole/data/reawork/refdevice` 下）：
-- BLE 协议、鉴权、配对、OTA 窗口：`refdevice_固件反汇编分析.md` 第 4 节
-- 板级与外设、引脚假设清单：`.agents/tasks/refboard-v2/design.md`（**V2 设计**；Weband 对标 V1，PDM / JD7601 / LGS4056 部分不适用，外设以产品 `AGENTS.md` 第一节的 V1 表为准）
+- BLE 协议、鉴权、配对、OTA 窗口：`/home/whole/data/reawork/refdevice-files/固件反汇编分析.md` 第 4 节
+- 板级与外设、引脚假设清单：`/home/whole/data/reawork/refdevice-files/v2-design.md`（**V2 设计**；Weband 对标 V1，PDM / JD7601 / LGS4056 部分不适用，外设以产品 `AGENTS.md` 第一节的 V1 表为准）
 - V1 外设证据：`/home/whole/data/reawork/refdevice-v1/v1_strings.txt`（V1 固件字符串）、`fw/firmware-manifest.json`、原理图截图 `/home/whole/share/mic_imu.webp`。上面的逆向分析基于 V2 固件，用到 V1 时先用 V1 字符串复核。
 - 构建与烧录、分区表：`analysis/固件构建与烧录参考.md`
 - 符号恢复覆盖范围：`analysis/sigmatch/COVERAGE.md`
