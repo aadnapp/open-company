@@ -32,10 +32,14 @@
 ## 等待项（等人）
 1. 采购 P1 外设（见 `goal.md`），不阻塞 P0。按 V1、不要屏幕（2026-11-13）：麦已有（3037 模拟麦）；不再需要屏。录音存储要 SD NAND / SD 卡模块（或按 V1 开源设计打板），充电要锂电版芯片的板子 + 锂电池（V1 为 502525），是否购买或打板待用户决定。不再需要 PDM 麦、JD7601、LGS4056、JDI 屏。
 4. 用户决定：无屏后 `MBWP` 壁纸帧在线协议上怎么处理（照收丢弃，或回不支持）。
-2. 用户决定：下一步先做「门控误触发」还是 M5（OTA / DFU）。
+2. 用户已定（2026-11-13）：下一步做 M5（OTA / DFU）。调研结论与待定项见下一步。
 3. 用户决定：录音存储掉电安全方案（NOR 上 FAT 改目录时掉电丢整个目录）是否排期。
 
 ## 下一步
+- **M5 OTA / DFU（调研完成，2026-11-13，待用户定 3 个问题后开工）**：
+  - V1 用 SiFli SDK 自带的 BLE DFU（`dfu_ctrl` / `ble_dfu`，固件字符串），走 SiFli 串口传输服务（App 里服务 UUID `00000000-0000-0000-6473-5f696c666973`）；App 自己实现 SiFli DFU 协议（START_REQ / PACKET / END_RSP）。V1 另加了一道：`dfu install denied: not armed by authenticated peer`，即 M2 的 `arm_ota` 窗口；OTA 前封口录音（`OTA recorder seal`）。
+  - 我们的分区已就位：`dfu_flash_code` 0x720000（384 KB）、`dfu_download_region` 0x780000（1152 KB）。SDK 打包工具有 Python 版（`tools/secureboot/imgtoolv37.py`、`dfu_bin_generate37.py`），Linux 可用。M5 不缺硬件；刷坏了可以随时用 UART + sftool 恢复。
+  - 待定：① App 按板型从自带资源里挑 OTA 包，并比较版本号；如果认成参考设备的板型，会把原厂固件推给我们（违反"不刷原厂镜像"）。设备上报什么板型 / 版本，需要定。② 签名密钥：开发阶段用 SDK 默认密钥，量产前换自有密钥（记 TODO）。③ 台架 OTA 工具：自己写 bleak 脚本走同一协议（与 `ble_pull_check.py` 同思路）。
 - 新工作项「门控误触发」：独立 worktree；方向是较长窗口内的说话帧比例、或排除骤起骤落的帧；用 `evidence/m3_knock/knocks_concat.wav` 与说话录音 950 / 806 在 `rec_sim` 里量化，再上板复测敲击。
 - 然后 M5（OTA / DFU）。
 - M3 记的 TODO(weband)：文件名 `.ogg` 与 V1 按小时 `.opus`（App 用 月.日.时 取开始时间）；`file_start` 未发 `start_ts` 等字段；`response` 别名；V1 的 VAD 设置持久化。
