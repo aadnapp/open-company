@@ -25,7 +25,7 @@ inclusion: always
 
 角色 digest:每个角色每天一份,`~/.local/state/open-company/digests/<日期>/<角色>.md`,由 cron 每小时用 `scripts/report/build_digests.py` 从日志、活动日志和各场 digest 汇总生成;即使当天没有唤醒 Agent 也会生成。图形化报告 `~/.local/state/open-company/report/index.html` 同时更新。
 
-活动日志:IDE 会话里替角色干活时,按 `activity-log.md`(always)用 `scripts/report/log_activity.py` 记一句话进展,写入 `~/.local/state/open-company/activity/<日期>.jsonl`;Stop hook 另记会话心跳。报告的角色概览、今日活动和时间线都读它。
+活动日志:IDE 会话里替角色干活时,按 `activity-log.md`(always)用 `scripts/report/log_activity.py` 记一句话进展,写入 `~/.local/state/open-company/activity/<日期>.jsonl`;Stop hook 另记会话心跳,并用 `scripts/report/capture_chat.py` 把对话原文摘取进 `~/.local/state/open-company/chat/<日期>.jsonl`。报告的角色概览、今日活动、对话记录和时间线都读它们。
 
 进度文件(每个产品目录下各一份,晚间盘点读取):
 - `goal.md`:当前目标、里程碑、结案条件。目标变化时更新。

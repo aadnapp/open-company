@@ -5,6 +5,7 @@ Reads (all local, nothing is sent anywhere):
   ~/.local/state/open-company/logs/<task>-<date>.log   cron runner log (run-task.sh)
   ~/.local/state/open-company/runs/<task>/<ts>/digest.md
   ~/.local/state/open-company/activity/<date>.jsonl    activity log (log_activity.py: IDE sessions + Stop-hook heartbeats)
+  ~/.local/state/open-company/chat/<date>.jsonl        chat log (capture_chat.py: user prompts + Agent replies, via Stop hook)
   ~/.local/state/open-company/needs-owner.log
   /proc/*/cmdline                                       to tell which cron tasks are running right now
   <repo>/companies/*/products/*/goal.md, handoff.md
@@ -127,6 +128,102 @@ def read_runs(events):
                                    if l.startswith("- ") and ("判定" in l or "blocked" in l)][:4]
     runs.sort(key=lambda r: r["start"], reverse=True)
     return runs
+
+
+def read_chat(since):
+    """Chat log records at or after `since`, oldest first. Written by capture_chat.py (Stop hook)."""
+    out = []
+    d = STATE / "chat"
+    for f in sorted(d.glob("*.jsonl")) if d.exists() else []:
+        try:
+            day = dt.date.fromisoformat(f.stem)
+        except ValueError:
+            continue
+        if day < since.date():
+            continue
+        for line in f.read_text(encoding="utf-8", errors="replace").splitlines():
+            try:
+                r = json.loads(line)
+                r["t"] = dt.datetime.fromisoformat(r["ts"])
+            except (ValueError, KeyError, TypeError):
+                continue
+            if r["t"] >= since:
+                out.append(r)
+    out.sort(key=lambda r: r["t"])
+    return out
+
+
+WAIT_WORDS = ("是否", "要不要", "需要我", "需要人", "确认", "请问", "？", "?")
+BLOCK_WORDS = ("blocked", "受阻", "卡住", "缺", "失败", "出错", "error")
+
+
+def first_sentence(text, limit=90):
+    """First line / sentence of a message, cut to `limit` chars, for use as a one-line highlight."""
+    if not text:
+        return ""
+    head = text.strip().splitlines()[0].strip()
+    for sep in ("。", ". ", "！", "!", "\n"):
+        i = head.find(sep)
+        if 0 < i < limit:
+            head = head[:i + 1]
+            break
+    return (head[:limit] + "…") if len(head) > limit else head
+
+
+def chat_sessions(chat, now):
+    """Group today's chat messages by session and reduce each to a one-line highlight.
+
+    `kiro 的一句话摘要`：用户诉求取第一条 user 消息，结果/现状取最后一条 assistant 消息，
+    不调用模型，纯文本规则，保证离线、可复现。"""
+    rows = [r for r in chat if r["t"].date() == now.date()]
+    by_session = defaultdict(list)
+    for r in rows:
+        by_session[r.get("session", "")].append(r)
+    sessions = []
+    for sid, msgs in by_session.items():
+        msgs.sort(key=lambda r: r["t"])
+        users = [m for m in msgs if m["who"] == "user"]
+        agents = [m for m in msgs if m["who"] == "assistant"]
+        last_agent_text = agents[-1]["text"] if agents else ""
+        waiting = any(w in last_agent_text for w in WAIT_WORDS)
+        blocked = any(w in last_agent_text.lower() for w in BLOCK_WORDS)
+        sessions.append({
+            "session": sid, "title": msgs[0].get("title") or sid, "msgs": msgs,
+            "start": msgs[0]["t"], "end": msgs[-1]["t"], "n_user": len(users), "n_agent": len(agents),
+            "ask": first_sentence(users[0]["text"]) if users else "（无用户发言，只有 Agent 输出）",
+            "result": first_sentence(last_agent_text) if agents else "（Agent 还没有回复）",
+            "waiting": waiting, "blocked": blocked,
+        })
+    sessions.sort(key=lambda s: s["end"], reverse=True)
+    return sessions
+
+
+def chat_table(chat, now):
+    sessions = chat_sessions(chat, now)
+    if not sessions:
+        return ("<p>今天还没有对话记录。由 Stop hook 调用 <code>scripts/report/capture_chat.py</code> "
+                "从 Kiro 会话记录中摘取。</p>")
+    cards = []
+    for s in sessions:
+        tag = ""
+        if s["blocked"]:
+            tag = '<span class="tag bad">受阻/出错</span>'
+        elif s["waiting"]:
+            tag = '<span class="tag warn">等待确认</span>'
+        detail_rows = "".join(
+            '<tr><td>%s</td><td class="who-%s">%s</td><td>%s</td></tr>'
+            % (esc(m["t"].strftime("%H:%M:%S")), esc(m["who"]), esc("用户" if m["who"] == "user" else "Agent"),
+               esc(m["text"]))
+            for m in s["msgs"])
+        cards.append(
+            '<div class="card chat-card"><h3>%s %s<small>%s–%s · %d 条用户发言 / %d 条 Agent 回复</small></h3>'
+            '<p><b>诉求：</b>%s</p><p><b>结果/现状：</b>%s</p>'
+            '<details><summary>查看完整对话（%d 条）</summary>'
+            '<table><thead><tr><th scope="col">时间</th><th scope="col">角色</th><th scope="col">内容</th></tr></thead>'
+            '<tbody>%s</tbody></table></details></div>'
+            % (esc(s["title"]), tag, esc(s["start"].strftime("%H:%M")), esc(s["end"].strftime("%H:%M")),
+               s["n_user"], s["n_agent"], esc(s["ask"]), esc(s["result"]), len(s["msgs"]), detail_rows))
+    return '<div class="grid">%s</div>' % "\n".join(cards)
 
 
 def read_needs_owner():
@@ -456,12 +553,15 @@ h3{font-size:15px;margin:0 0 6px} h3 small,h4{font-weight:normal;color:#555;font
 table{border-collapse:collapse;width:100%;font-size:13px} th,td{border:1px solid #d5dbe1;padding:5px 7px;text-align:left;vertical-align:top}
 th{background:#eef1f4} td ul{margin:2px 0 2px 16px;padding:0} code{font-size:12px;color:#444;word-break:break-all}
 .tag{display:inline-block;padding:1px 6px;border-radius:3px;font-size:12px;color:#fff;background:#666}.tag.bad{background:#d64545}
+.tag.warn{background:#e0a100}
+.who-user{color:#1f9d55;font-weight:600} .who-assistant{color:#2f6fdb;font-weight:600}
+.chat-card p{margin:4px 0} .chat-card details{margin-top:6px} .chat-card summary{cursor:pointer;color:#2f6fdb;font-size:13px}
 .legend span{display:inline-block;margin-right:14px;font-size:13px} .legend i{display:inline-block;width:12px;height:12px;margin-right:4px;vertical-align:-1px}
 pre{background:#f3f5f7;padding:8px;font-size:12px;white-space:pre-wrap}
 """
 
 
-def freshness(now, events, activity, manual):
+def freshness(now, events, activity, chat, manual):
     """When each source last changed, and when the next scheduled rebuild is."""
     nxt = now.replace(minute=REFRESH_MINUTE, second=0)
     if nxt <= now:
@@ -469,7 +569,7 @@ def freshness(now, events, activity, manual):
     beats = [r["t"] for r in activity if r["kind"] == "heartbeat"]
     acts = [r["t"] for r in activity if r["kind"] != "heartbeat"]
     src = [("cron 日志", events[-1][0] if events else None), ("活动日志", acts[-1] if acts else None),
-           ("IDE 心跳", beats[-1] if beats else None)]
+           ("IDE 心跳", beats[-1] if beats else None), ("对话记录", chat[-1]["t"] if chat else None)]
     src += [("%s 证据 digest" % m["product"], m["mtime"]) for m in manual]
     parts = "；".join("%s %s" % (n, t.strftime("%m-%d %H:%M") if t else "无") for n, t in src)
     return ('<p class="fresh">数据截至 <b>%s</b>（报告不是实时的，cron 每小时第 %d 分钟重建，下次约 <b>%s</b>；'
@@ -483,6 +583,7 @@ def build(days, out):
     events = read_events(since)
     runs = read_runs(events)
     activity = read_activity(since)
+    chat = read_chat(since)
     manual = read_manual()
     products = read_products()
     running = running_tasks()
@@ -498,14 +599,16 @@ def build(days, out):
 %s
 <h2>各角色概览</h2><div class="grid">%s</div>
 <h2>今日活动（IDE 会话与任务记录，新的在上）</h2>%s
+<h2>今日对话记录（用户与 Agent 原文，新的在上）</h2>%s
 <h2>今日各角色 digest</h2>%s
 <h2>时间线（每格 1 小时，悬停看明细）</h2><div class="legend">%s</div>%s
 <h2>Agent 运行记录</h2>%s
 <h2>手动任务（证据 digest）</h2><div class="grid">%s</div>
 <h2>产品进度（goal.md / handoff.md）</h2><div class="grid">%s</div>
 <h2>待人处理（needs-owner.log）</h2><pre>%s</pre>
-</body></html>""" % (CSS, esc(now), esc(since.date()), days, freshness(now, events, activity, manual),
+</body></html>""" % (CSS, esc(now), esc(since.date()), days, freshness(now, events, activity, chat, manual),
                      role_cards(events, runs, activity, manual, products, running, now), activity_table(activity, now),
+                     chat_table(chat, now),
                      role_digests_section(now.date()), legend, timeline_svg(events, activity, since, days),
                      runs_table(runs, running), manual_section(manual), products_section(products),
                      esc("\n".join(needs[-20:]) or "无"))

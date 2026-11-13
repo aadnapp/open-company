@@ -10,6 +10,16 @@
         "command": "/usr/bin/python3 /home/whole/data/src/open-company/scripts/report/log_activity.py --heartbeat",
         "timeout": 10
       }
+    },
+    {
+      "name": "Chat capture",
+      "trigger": "Stop",
+      "description": "After each Agent turn, copy new user prompts and Agent replies (text only, secrets redacted, no tool calls) from this turn's Kiro session transcript into ~/.local/state/open-company/chat/ so the progress report can show the actual conversation, not just a heartbeat.",
+      "action": {
+        "type": "command",
+        "command": "/usr/bin/python3 /home/whole/data/src/open-company/scripts/report/capture_chat.py",
+        "timeout": 20
+      }
     }
   ]
 }

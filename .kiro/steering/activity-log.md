@@ -4,7 +4,7 @@ inclusion: always
 
 # IDE 会话活动记录
 
-进度报告（`~/.local/state/open-company/report/index.html`）看不到 IDE 对话本身，只看得到写进活动日志的内容。所以在 IDE 会话里替某个角色干活时，按下面的规则记录。
+进度报告（`~/.local/state/open-company/report/index.html`）的角色概览、今日活动和时间线只看写进活动日志的内容；对话原文由 Stop hook 自动摘取展示在「今日对话记录」小节，不用额外操作。所以在 IDE 会话里替某个角色干活时，按下面的规则记一句话进展。
 
 ## 怎么记
 
@@ -31,10 +31,10 @@ python3 /home/whole/data/src/open-company/scripts/report/log_activity.py \
 
 ## 不要写进去的
 
-- 密钥、token、口令、对话原文、用户个人信息。
+- 密钥、token、口令、对话原文、用户个人信息。这条一句话摘要只写结果和判定；对话原文已经由 Stop hook 自动记录，不用也不要在这里重复。
 - 没有发生的事。记录是事实，不是计划；计划写进 `handoff.md` 的「下一步」。
 
 ## 和其它记录的关系
 
 - 活动日志是给报告看的一句话摘要，不代替产品自己的证据：Weband 的逐步实测仍写 `evidence/digest.md`，现状和等待项仍写 `handoff.md`。
-- 每轮回复结束，Stop hook 会自动记一条「会话心跳」（只有时间和工作区，不含内容）。报告据此提示「有会话活动但没有记录进展」，所以漏记会被看出来。
+- 每轮回复结束，Stop hook 会自动记一条「会话心跳」（只有时间和工作区，不含内容），并调用 `scripts/report/capture_chat.py` 把这轮新增的用户发言和 Agent 实际回复文字摘取进 `~/.local/state/open-company/chat/<日期>.jsonl`（经过粗略脱敏，不含工具调用和推理过程）。报告据此在「今日活动」小节提示「有会话活动但没有记录进展」，在「今日对话记录」小节展示对话原文，所以漏记一句话进展会被看出来，对话内容则始终能看到。
