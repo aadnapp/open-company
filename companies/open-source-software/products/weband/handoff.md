@@ -3,7 +3,7 @@
 最近更新：2026-11-13
 
 ## 现状
-- **M3 录音收尾（2026-11-13）**：worktree `/home/whole/data/reawork/weband/.worktrees/m3-recording`，分支 `m3-recording` @ `008b597`（未推送、未合入 main）。板上跑 `main.bin` `5c0c03cf…0fd9`，处于开放模式（未配对）。
+- **M3 录音已完成（2026-11-13）**：已快进合入 Weband `main` 并推送（`origin/main` = `008b597`），worktree 与分支已清理；工作树外的录音文件（`.ogg` / `.wav` / `fs_region.img`，不入库）已移到主仓 `evidence/` 下。板上跑 `main.bin` `5c0c03cf…0fd9`，处于开放模式（未配对）。
   - 录音：WebRTC VAD 门控（余量 8 dB、触发 6 帧）+ Opus SILK 16 kHz 24 kbit/s，60 s 一段写 `/weband/rec/NNNNNN.ogg`。
   - 存储：已用超过 2/3 开始裁剪（用户定），先删已传到手机的（`ACKED.txt`），再删最旧的，删到剩余 1/3 + 256 KB；5 分钟 fsync（用户定）；开机删空文件。实测：先删 9 个已 ACK、再删 3 个最旧，丢帧 0。
   - BLE 传录音：按原版 App 1.3.1 的 `ready` / `ack` + MBF1 帧实现。台架脚本 `scripts/ble_pull_check.py` 实测：基本拉取、丢块重传、断线续传都通过，206 个积压文件一次拉完 829/829。
@@ -30,17 +30,16 @@
 
 ## 等待项（等人）
 1. 采购 P1 外设（见 `goal.md`），不阻塞 P0。按 V1：麦已有（3037 模拟麦）；缺 JDI387A 圆屏 + 转接。充电要换锂电版芯片的板子（如 SF32LB52-DevKit-LCD）+ 锂电池，是否购买待用户决定。不再需要 PDM 麦、JD7601、LGS4056。
-2. 用户确认：`m3-recording` 合入 Weband `main` 并推送。
+2. 用户决定：下一步先做「门控误触发」还是 M5（OTA / DFU）。
 3. 用户决定：录音存储掉电安全方案（NOR 上 FAT 改目录时掉电丢整个目录）是否排期。
 
 ## 下一步
-- 合入 M3 后清理 worktree 与分支。
 - 新工作项「门控误触发」：独立 worktree；方向是较长窗口内的说话帧比例、或排除骤起骤落的帧；用 `evidence/m3_knock/knocks_concat.wav` 与说话录音 950 / 806 在 `rec_sim` 里量化，再上板复测敲击。
 - 然后 M5（OTA / DFU）。
 - M3 记的 TODO(weband)：文件名 `.ogg` 与 V1 按小时 `.opus`（App 用 月.日.时 取开始时间）；`file_start` 未发 `start_ts` 等字段；`response` 别名；V1 的 VAD 设置持久化。
 
 ## 证据索引
-- 每步实测记录：`/home/whole/data/reawork/weband/evidence/digest.md`（M3 期间在 worktree 里：`.worktrees/m3-recording/evidence/digest.md`）
+- 每步实测记录：`/home/whole/data/reawork/weband/evidence/digest.md`
 - M3：`evidence/m3_night`、`m3_morning`、`m3_speech*`（门控调参）、`m3_xfer`（BLE 传输、fs 修复）、`m3_knock`（敲击测试、夜间分时统计）
 - 构建日志：`evidence/build_nano_n16r16.log`、`evidence/build_weband.log`
 - 烧录与回读：M0 `flash_hello_world.log` / `flash_readback.txt`；M1 `flash_weband.log` / `flash_readback_weband.txt`
