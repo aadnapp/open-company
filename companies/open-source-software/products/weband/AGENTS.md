@@ -50,9 +50,9 @@
   - 原理图截图 `/home/whole/share/mic_imu.webp`（V1 的麦克风与 IMU 部分）。
 - **工作目录**：`/home/whole/data/reawork/weband`（已确认并创建）。建仓后在 `Productfile.yaml` 补 `source.git`。
   - `sifli-sdk/`：从 `refdevice/sifli-sdk` 本地克隆，分支 `weband-base`，固定在上游 `release/v2.5` 的 `87d5700a`，**不含**原目录里 `seiyamiro` 的 4 个自有提交（参考设备板级、协议核心与主机测试）。M2 需要时从那 4 个提交里挑选移植。子模块 URL 已指向本地 `.git/modules`，推送到远端前需改回官方地址。
-  - `evidence/`：探测、备份、构建与烧录证据。
+  - `evidence/`：探测、备份、构建与烧录证据。按公司准则「证据目录按时间编号」组织：每一步一个 `NNNN_<主题>/` 文件夹（如 `0024_v1_probe/`），`digest.md` 不编号。2026-11-16 整理旧目录时的对照表在 `evidence/0028_evidence_renumber/rename_map.tsv`。台架脚本（`speech_session.sh`、`quiet_session.sh`、`battery_log.py` 等）的输出目录参数要传带编号的名字。
 - **本机工具链**（SiFli SDK 已安装）：`~/.sifli/tools/arm-none-eabi-gcc/14.2.1`、`~/.sifli/tools/sftool/0.2.5/sftool`；`source export.sh` 即可编译。
-- **出厂备份**：`evidence/factory_flash_first4MB.bin`（SHA-256 `0343fa70…913c01`）。出厂内容只占 `0x12000000–0x12090000`，该备份已完整覆盖，可用来还原。
+- **出厂备份**：`evidence/0003_factory_backup/factory_flash_first4MB.bin`（SHA-256 `0343fa70…913c01`）。出厂内容只占 `0x12000000–0x12090000`，该备份已完整覆盖，可用来还原。
 
 ### 与原厂板的差异（必须先正视）
 对标的 V1 原厂板（`sf32lb52-refboard-v1`）有：SF32LB525UC6、模拟 MEMS 麦（`MIC_BIAS` / `MIC_ADC`）、128 MB SD NAND（录音）、16 MB SPI NOR、片内 PMU 充电 + 502525 电池、电源键、LSM6DS3TR-C IMU，以及 Weband 不做的圆形反射屏。DevKit-Nano 板上这些器件都没有（NOR 除外）。2026-11-10 按 Nano 原理图、SiFli 硬件设计指南与 SDK 核对（纸面，未实测，详见 Weband 仓库 `docs/hardware-inventory.md` C5）：

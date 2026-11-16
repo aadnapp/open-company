@@ -223,7 +223,7 @@ scripts/build.sh <工程目录> sf32lb52-weband          # 编其它 SCons 工�
      [ "$(sha256sum < $1)" = "$(sha256sum < $o)" ] && echo "$2 MATCH" || echo "$2 MISMATCH"; rm -f $o
    done
    ```
-4. 把烧录日志、哈希和回读结果追加到 `evidence/digest.md`。
+4. 烧录日志、哈希和回读结果放进本次的编号文件夹 `evidence/NNNN_<主题>/`（取当前最大编号加 1），判定追加到 `evidence/digest.md`。
 
 禁止事项：不烧参考设备原厂镜像（`main.bin`、`dfu.bin`、`ftab.bin`、`bootloader.bin`）；不改 `ftab` 和 bootloader 地址。
 
@@ -260,13 +260,13 @@ pin read 34           # 按住 KEY1 时为 1，松开为 0
 
 出厂固件的前 4 MB 已备份（出厂内容只占 `0x12000000–0x12090000`，这份备份完整覆盖）：
 ```
-/home/whole/data/reawork/weband/evidence/factory_flash_first4MB.bin
+/home/whole/data/reawork/weband/evidence/0003_factory_backup/factory_flash_first4MB.bin
 SHA-256 0343fa709bf26bbeb1b1046803eb1f9236d41b72746ee0a49ada49d762913c01
 ```
 ```bash
 cd /home/whole/data/reawork/weband/evidence
-sha256sum factory_flash_first4MB.bin                # 先核对哈希
-~/.sifli/tools/sftool/0.2.5/sftool -c SF32LB52 -p /dev/ttyUSB0 write_flash --verify factory_flash_first4MB.bin@0x12000000
+sha256sum 0003_factory_backup/factory_flash_first4MB.bin                # 先核对哈希
+~/.sifli/tools/sftool/0.2.5/sftool -c SF32LB52 -p /dev/ttyUSB0 write_flash --verify 0003_factory_backup/factory_flash_first4MB.bin@0x12000000
 ```
 这条命令没有实际执行过。写入 4 MB 需要几分钟；写完用 miniterm 确认出现出厂横幅 `SF32LB52-Nano V1.1.0`。
 
@@ -287,7 +287,7 @@ sha256sum factory_flash_first4MB.bin                # 先核对哈希
   git clone /path/to/weband.bundle weband && cd weband
   git remote set-url origin git@github.com:aadnapp/weband.git && git push -u origin main
   ```
-- 不入库：`sifli-sdk/`、构建输出、`evidence/*.bin`、`docs/img/`、`.vscode/`（见 `.gitignore`）。
+- 不入库：`sifli-sdk/`、构建输出、`evidence/**/*.bin`、`docs/img/`、`.vscode/`（见 `.gitignore`）。
 - M2 起每个研发工作项在独立 worktree 里做，完成后再合回 `main`：
   ```bash
   git -C /home/whole/data/reawork/weband worktree add .worktrees/<名字> -b <分支名> main
@@ -363,7 +363,7 @@ sudo modprobe -r btusb && sudo modprobe btusb
   1. 用 `pull_recordings.sh` 或 `sftool read_flash <img>@0x128A0000:4194304` 先只读备份整区，`fsck.fat -n <img>` 看坏在哪。
   2. `fsck.fat -a` 清不掉 0xFF 的目录项时，在主机上重建：保留原引导扇区，清零 FAT 和根目录（FAT12 头 3 字节为 `F8 FF FF`），`mmd ::/weband ::/weband/rec`，再 `fsck.fat -n` 必须干净。注意 `/weband/pair.token`（配对令牌）也在这个区，若存在要先用 `mcopy` 取出、重建后放回。
   3. `sftool ... write_flash --verify <img>@0x128A0000`，再整区读回比对 SHA-256，开机看 `df` 和 `rec`。
-  步骤记录在 Weband `evidence/digest.md`（2026-11-12「fs_region 修复」）和 `evidence/m3_xfer/fs_corrupt/`。
+  步骤记录在 Weband `evidence/digest.md`（2026-11-12「fs_region 修复」）和 `evidence/0018_m3_xfer/fs_corrupt/`。
 - **已知风险**：NOR 上的 FAT 改目录时（删文件、建文件）如果掉电或复位，整个目录可能丢失，不只是正在写的那一段。掉电安全方案待定。
 
 ### 6.9b 电源键（M4，KEY1 = PA34，按下为高）

@@ -4,3 +4,6 @@ config.toml
 # Python 缓存
 __pycache__/
 *.pyc
+
+# Local VS Code workspace file
+companies/open-source-software/products/weband/bandwo.code-workspace
