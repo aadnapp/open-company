@@ -38,3 +38,16 @@ python3 /home/whole/data/src/open-company/scripts/report/log_activity.py \
 
 - 活动日志是给报告看的一句话摘要，不代替产品自己的证据：Weband 的逐步实测仍写 `evidence/digest.md`，现状和等待项仍写 `handoff.md`。
 - 每轮回复结束，Stop hook 会自动记一条「会话心跳」（只有时间和工作区，不含内容），并调用 `scripts/report/capture_chat.py` 把这轮新增的用户发言和 Agent 实际回复文字摘取进 `~/.local/state/open-company/chat/<日期>.jsonl`（经过粗略脱敏，不含工具调用和推理过程）。报告据此在「今日活动」小节提示「有会话活动但没有记录进展」，在「今日对话记录」小节展示对话原文，所以漏记一句话进展会被看出来，对话内容则始终能看到。
+
+## workflow 运行时（2026-11-19 用户指出）
+
+workflow 的每一步是单独的会话，**不触发 Stop hook**：不记心跳，不即时摘取对话，也不重建报告。2026-11-19 按小时录音那次 workflow，设计到编码约 40 分钟，活动日志里一条记录都没有，收尾后 `goal.md` 也停在「上板验证待用户确认」。所以：
+
+- **每一步自己记活动日志**：步骤开始记 `start`，出结论记 `progress` 或 `done`，停下来请示用户前记 `waiting`。角色按上面的规则选（Weband 的工作记 `固件研发与实测`）。一句话里写 workflow 的步骤名，例如 `设计: design.md 已写完，3 个待定点已请示`。
+- **步骤结束时重建报告**：
+  ```bash
+  cd /home/whole/data/src/open-company/scripts/report && python3 capture_chat.py && python3 build_digests.py >/dev/null && python3 build_report.py >/dev/null
+  ```
+  cron 每 10 分钟也会跑同样的命令兜底（`scripts/cron/crontab.example`）。
+- **收尾那一步更新产品状态**：一项工作合入或状态变化时，同步改产品的 `goal.md`（对应遗留或里程碑条目）和 `handoff.md`（顶部「最近更新」与对应条目），写清提交号、证据路径和没测的部分。
+- **发起 workflow 的会话（编排者）负责兜底**：写 workflow brief 时把以上三条写进去；收到 workflow 完成的通知后，核对 `goal.md` / `handoff.md` 是否已经更新到最新结论，没有就补上，再重建一次报告。之后在会话里继续做的实测和修复，同样要回写这两个文件。

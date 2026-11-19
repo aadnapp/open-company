@@ -125,4 +125,11 @@ if [ -f "$DIGEST" ] && grep -qE '^[[:space:]*-]*`?needsOwner:[[:space:]]*true`?[
   printf '%s %s %s\n' "$(date '+%F %T')" "$TASK" "$DIGEST" >>"$STATE_DIR/needs-owner.log"
   log "needsOwner: true -> $STATE_DIR/needs-owner.log"
 fi
+
+# Agent 额度用尽时 kiro-cli 只会 exit=1,没人看日志就会连续多天静默失败:写一行到 needs-owner.log
+if [ "$rc" -ne 0 ] && grep -qE 'UsageLimitReachedError|MONTHLY_REQUEST_COUNT' "$RUN_DIR/agent.log" 2>/dev/null; then
+  printf '%s %s quota-exhausted(Kiro 用量已用完,需开启超额用量或等下月) %s\n' \
+    "$(date '+%F %T')" "$TASK" "$RUN_DIR/agent.log" >>"$STATE_DIR/needs-owner.log"
+  log "quota exhausted -> $STATE_DIR/needs-owner.log"
+fi
 exit "$rc"

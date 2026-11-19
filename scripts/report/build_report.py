@@ -13,6 +13,8 @@ Reads (all local, nothing is sent anywhere):
 
 Writes ~/.local/state/open-company/report/index.html (no scripts, no external assets).
 
+Section order is fixed by SECTION_ORDER below (data-freshness line first, then the sections in that list).
+
 Usage: build_report.py [--days N] [--out PATH]
 Python 3.8+, standard library only.
 """
@@ -45,7 +47,20 @@ MANUAL_ROLES = [
 ]
 # Activity kinds accepted by log_activity.py, in report order
 KINDS = {"start": "开始", "progress": "进展", "done": "完成", "blocked": "受阻", "waiting": "等人", "heartbeat": "会话心跳"}
-REFRESH_MINUTE = 7  # build_digests + build_report run at minute 7 of every hour (crontab)
+# 报告各节的固定顺序（key, 标题）。改顺序只改这里，并同步 docs/operator-manual.md 第 2 节。
+SECTION_ORDER = [
+    ("roles", "各角色概览"),
+    ("todo", "产品待办与待人处理（handoff.md 待办清单 / needs-owner.log）"),
+    ("activity", "今日活动（IDE 会话与任务记录，新的在上）"),
+    ("chat", "今日对话记录（用户与 Agent 原文，新的在上）"),
+    ("history", "历史对话（按日期折叠，新的在上）"),
+    ("digests", "今日各角色 digest"),
+    ("timeline", "时间线（每格 1 小时，悬停看明细）"),
+    ("runs", "Agent 运行记录"),
+    ("manual", "手动任务（证据 digest）"),
+]
+REFRESH_MINUTE = 7  # first cron rebuild of each hour (crontab: capture_chat + build_digests + build_report)
+REFRESH_EVERY = 10   # minutes between cron rebuilds (crontab.example: 7-59/10)
 
 LINE_RE = re.compile(r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) \[([\w-]+)\] (.*)$")
 COLORS = {"err": "#d64545", "woke": "#2f6fdb", "run": "#1f9d55", "ok": "#b9c2cc", "skip": "#e0a100",
@@ -170,12 +185,12 @@ def first_sentence(text, limit=90):
     return (head[:limit] + "…") if len(head) > limit else head
 
 
-def chat_sessions(chat, now):
+def chat_sessions(chat, day):
     """Group today's chat messages by session and reduce each to a one-line highlight.
 
     `kiro 的一句话摘要`：用户诉求取第一条 user 消息，结果/现状取最后一条 assistant 消息，
     不调用模型，纯文本规则，保证离线、可复现。"""
-    rows = [r for r in chat if r["t"].date() == now.date()]
+    rows = [r for r in chat if r["t"].date() == day]
     by_session = defaultdict(list)
     for r in rows:
         by_session[r.get("session", "")].append(r)
@@ -198,8 +213,8 @@ def chat_sessions(chat, now):
     return sessions
 
 
-def chat_table(chat, now):
-    sessions = chat_sessions(chat, now)
+def chat_table(chat, day):
+    sessions = chat_sessions(chat, day)
     if not sessions:
         return ("<p>今天还没有对话记录。由 Stop hook 调用 <code>scripts/report/capture_chat.py</code> "
                 "从 Kiro 会话记录中摘取。</p>")
@@ -224,6 +239,46 @@ def chat_table(chat, now):
             % (esc(s["title"]), tag, esc(s["start"].strftime("%H:%M")), esc(s["end"].strftime("%H:%M")),
                s["n_user"], s["n_agent"], esc(s["ask"]), esc(s["result"]), len(s["msgs"]), detail_rows))
     return '<div class="grid">%s</div>' % "\n".join(cards)
+
+
+HIST_JS = """<script>
+(function(){
+  var q=document.getElementById('hist-q'),n=document.getElementById('hist-n');
+  if(!q)return;
+  var days=[].slice.call(document.querySelectorAll('#hist .hist-day'));
+  q.addEventListener('input',function(){
+    var k=q.value.trim().toLowerCase(),hit=0;
+    days.forEach(function(d){
+      var any=false;
+      [].forEach.call(d.querySelectorAll('.chat-card'),function(c){
+        var m=!k||c.textContent.toLowerCase().indexOf(k)>=0;
+        c.style.display=m?'':'none';
+        if(m)any=true;
+      });
+      hit+=any&&k?[].filter.call(d.querySelectorAll('.chat-card'),function(c){return c.style.display!=='none'}).length:0;
+      d.style.display=any?'':'none';
+      d.open=!!k&&any;
+    });
+    n.textContent=k?('匹配 '+hit+' 个会话'):'';
+  });
+})();
+</script>"""
+
+
+def chat_history(chat, today):
+    """Chat of all earlier days, newest day first, one collapsible block per day."""
+    days = sorted({r["t"].date() for r in chat if r["t"].date() < today}, reverse=True)
+    if not days:
+        return "<p>没有更早的对话记录。</p>"
+    blocks = []
+    for d in days:
+        n = len(chat_sessions(chat, d))
+        blocks.append('<details class="hist-day"><summary>%s · %d 个会话</summary>%s</details>'
+                      % (esc(d.isoformat()), n, chat_table(chat, d)))
+    box = ('<p><input id="hist-q" type="search" placeholder="搜索历史对话关键词（会话标题、诉求、对话原文）" '
+           'aria-label="搜索历史对话" style="width:min(480px,100%%);padding:6px 8px">'
+           ' <span id="hist-n" class="meta"></span></p>')
+    return box + '<div id="hist">' + "\n".join(blocks) + '</div>' + HIST_JS
 
 
 def read_needs_owner():
@@ -275,7 +330,7 @@ def read_products():
         if not (pdir / "Productfile.yaml").exists() or pdir.name in TEMPLATE_PRODUCTS:
             continue
         p = {"id": pdir.name, "milestones": [], "waiting": [], "updated": None,
-             "has_goal": (pdir / "goal.md").exists(), "has_handoff": (pdir / "handoff.md").exists()}
+             "todos": [], "todo_items": [], "has_goal": (pdir / "goal.md").exists(), "has_handoff": (pdir / "handoff.md").exists()}
         if p["has_goal"]:
             for line in (pdir / "goal.md").read_text(encoding="utf-8").splitlines():
                 cells = [c.strip() for c in line.strip().strip("|").split("|")]
@@ -289,7 +344,26 @@ def read_products():
             m = re.search(r"^## *等待项.*?\n(.*?)(?=^##|\Z)", text, re.M | re.S)
             if m:
                 p["waiting"] = [re.sub(r"^\d+\.\s*", "", l.strip()) for l in m.group(1).splitlines()
-                                if re.match(r"\s*(\d+\.|-)\s", l)]
+                                if re.match(r"\s*(\d+\.|-)\s", l) and "~~" not in l[:12]]
+            m = re.search(r"^## *待办清单.*?\n(.*?)(?=^## |\Z)", text, re.M | re.S)
+            if m:
+                for l in m.group(1).splitlines():
+                    mm = re.match(r"\s*-\s*\[(高|中|低)\]\[([^\]]+)\]\s*(.*)$", l)
+                    if mm:
+                        p["todo_items"].append(mm.groups())
+            # 没有「待办清单」时的兜底：「下一步」一节里没有划掉、没写「已完成」的条目（含缩进的子条目）；调研记录之后不再收
+            m = re.search(r"^## *下一步.*?\n(.*?)(?=^## |\Z)", text, re.M | re.S)
+            if m:
+                for l in ([] if p["todo_items"] else m.group(1).splitlines()):
+                    if l.startswith("- （以下为"):
+                        break
+                    if re.match(r"\s*-\s", l) and not re.match(r"\s*-\s+(\*\*)?~~", l) \
+                            and "已完成" not in l and not re.match(r"\s*-\s+(结果|\*\*[^*]*\*\*[:：]$)", l) and "已合入" not in l[:60]:
+                        p["todos"].append(re.sub(r"^\s*-\s*", "", l).strip())
+        if p["has_goal"] and not p["todo_items"]:
+            for l in (pdir / "goal.md").read_text(encoding="utf-8").splitlines():
+                if "待用户定" in l or "待定" in l:
+                    p["todos"].append("[goal.md] " + l.strip().lstrip("-").strip())
         out.append(p)
     return out
 
@@ -500,6 +574,26 @@ def runs_table(runs, running):
             % "".join(rows))
 
 
+PRIO_CLASS = {"高": "bad", "中": "warn", "低": "idle"}
+
+
+def todo_block(p):
+    """The product's to-do list, made prominent: count badge, then items grouped 高/中/低.
+    Source is handoff.md 「待办清单」 (curated); without it, falls back to heuristic lines."""
+    items = p["todo_items"]
+    if not items:
+        lis = "".join("<li>%s</li>" % esc(t if len(t) <= 220 else t[:220] + "…") for t in p["todos"]) or "<li>无</li>"
+        return ('<div class="todo"><h4 class="todo-h">待办 <span class="badge">%d</span>'
+                '<small>handoff.md 没有「待办清单」一节，以下为按关键词猜的</small></h4><ul>%s</ul></div>'
+                % (len(p["todos"]), lis))
+    cnt = {k: sum(1 for i in items if i[0] == k) for k in "高中低"}
+    head = "".join('<span class="tag %s">%s %d</span> ' % (PRIO_CLASS[k], k, cnt[k]) for k in "高中低" if cnt[k])
+    rows = "".join('<li class="p-%s"><span class="tag %s">%s</span> <span class="st">%s</span> %s</li>'
+                   % (PRIO_CLASS[pr], PRIO_CLASS[pr], esc(pr), esc(st), esc(tx)) for pr, st, tx in items)
+    return ('<div class="todo"><h4 class="todo-h">待办 <span class="badge">%d</span> %s'
+            '<small>来源 handoff.md「待办清单」，高优先在前</small></h4><ul>%s</ul></div>' % (len(items), head, rows))
+
+
 def products_section(products):
     out = []
     for p in products:
@@ -508,10 +602,12 @@ def products_section(products):
             continue
         ms = "".join("<tr><td>%s</td><td>%s</td><td>%s</td></tr>" % (esc(a), esc(b), esc(c)) for a, b, c in p["milestones"])
         wt = "".join("<li>%s</li>" % esc(w) for w in p["waiting"]) or "<li>无</li>"
+        td = todo_block(p)
         out.append('<div class="card"><h3>%s <small>handoff 更新：%s</small></h3>'
                    '<table><thead><tr><th scope="col">项</th><th scope="col">内容</th><th scope="col">状态</th></tr></thead>'
-                   '<tbody>%s</tbody></table><h4>等人处理</h4><ul>%s</ul></div>'
-                   % (esc(p["id"]), esc(p["updated"] or "未写"), ms, wt))
+                   '<tbody>%s</tbody></table><h4>等人处理</h4><ul>%s</ul>'
+                   '%s</div>'
+                   % (esc(p["id"]), esc(p["updated"] or "未写"), ms, wt, td))
     return "\n".join(out)
 
 
@@ -555,26 +651,33 @@ th{background:#eef1f4} td ul{margin:2px 0 2px 16px;padding:0} code{font-size:12p
 .tag{display:inline-block;padding:1px 6px;border-radius:3px;font-size:12px;color:#fff;background:#666}.tag.bad{background:#d64545}
 .tag.warn{background:#e0a100}
 .who-user{color:#1f9d55;font-weight:600} .who-assistant{color:#2f6fdb;font-weight:600}
+.hist-day{margin:8px 0} .hist-day>summary{cursor:pointer;font-weight:600;padding:4px 0}
 .chat-card p{margin:4px 0} .chat-card details{margin-top:6px} .chat-card summary{cursor:pointer;color:#2f6fdb;font-size:13px}
 .legend span{display:inline-block;margin-right:14px;font-size:13px} .legend i{display:inline-block;width:12px;height:12px;margin-right:4px;vertical-align:-1px}
+.todo{margin-top:12px;padding:8px 12px;border:2px solid #d64545;border-radius:6px;background:#fff6f6}
+.todo-h{font-size:16px;color:#111;margin:0 0 6px} .todo-h small{margin-left:8px}
+.badge{display:inline-block;min-width:22px;text-align:center;padding:1px 8px;border-radius:11px;background:#d64545;color:#fff;font-size:14px}
+.todo ul{list-style:none;margin:0;padding:0} .todo li{font-size:14px;padding:4px 0;border-bottom:1px dotted #e3c9c9}
+.todo li.p-bad{font-weight:600} .todo .st{color:#555;font-size:12px;border:1px solid #bbb;border-radius:3px;padding:0 4px;font-weight:normal}
+.tag.idle{background:#8892a0}
 pre{background:#f3f5f7;padding:8px;font-size:12px;white-space:pre-wrap}
 """
 
 
 def freshness(now, events, activity, chat, manual):
     """When each source last changed, and when the next scheduled rebuild is."""
-    nxt = now.replace(minute=REFRESH_MINUTE, second=0)
-    if nxt <= now:
-        nxt += dt.timedelta(hours=1)
+    # cron runs at minute REFRESH_MINUTE, then every REFRESH_EVERY minutes (crontab.example)
+    m = REFRESH_MINUTE + ((now.minute - REFRESH_MINUTE) // REFRESH_EVERY + 1) * REFRESH_EVERY
+    nxt = now.replace(minute=0, second=0) + dt.timedelta(minutes=m)
     beats = [r["t"] for r in activity if r["kind"] == "heartbeat"]
     acts = [r["t"] for r in activity if r["kind"] != "heartbeat"]
     src = [("cron 日志", events[-1][0] if events else None), ("活动日志", acts[-1] if acts else None),
            ("IDE 心跳", beats[-1] if beats else None), ("对话记录", chat[-1]["t"] if chat else None)]
     src += [("%s 证据 digest" % m["product"], m["mtime"]) for m in manual]
     parts = "；".join("%s %s" % (n, t.strftime("%m-%d %H:%M") if t else "无") for n, t in src)
-    return ('<p class="fresh">数据截至 <b>%s</b>（报告不是实时的，cron 每小时第 %d 分钟重建，下次约 <b>%s</b>；'
+    return ('<p class="fresh">数据截至 <b>%s</b>（报告不是实时的，cron 每 %d 分钟重建，下次约 <b>%s</b>；'
             '想马上看最新的，按操作手册第 2 节手动重建）<br>各来源最近更新：%s</p>'
-            % (esc(now.strftime("%m-%d %H:%M")), REFRESH_MINUTE, esc(nxt.strftime("%H:%M")), esc(parts)))
+            % (esc(now.strftime("%m-%d %H:%M")), REFRESH_EVERY, esc(nxt.strftime("%H:%M")), esc(parts)))
 
 
 def build(days, out):
@@ -584,6 +687,7 @@ def build(days, out):
     runs = read_runs(events)
     activity = read_activity(since)
     chat = read_chat(since)
+    chat_all = read_chat(dt.datetime(2000, 1, 1))  # history covers every recorded day
     manual = read_manual()
     products = read_products()
     running = running_tasks()
@@ -591,27 +695,29 @@ def build(days, out):
                      for k in ("ok", "woke", "run", "act", "hb", "skip", "err"))
     legend += '<span><i style="background:#f3f5f7;border:1px solid #ccc"></i>无记录（关机或未排班）</span>'
     needs = read_needs_owner()
+    # 报告各节顺序固定为 SECTION_ORDER（见文件顶部）；要增删或换位只改那个列表。
+    body = {
+        "roles": '<div class="grid">%s</div>' % role_cards(events, runs, activity, manual, products, running, now),
+        "todo": '<div class="grid">%s</div><h4>needs-owner.log（最近 20 行）</h4><pre>%s</pre>'
+                % (products_section(products), esc("\n".join(needs[-20:]) or "无")),
+        "activity": activity_table(activity, now),
+        "chat": chat_table(chat, now.date()),
+        "history": chat_history(chat_all, now.date()),
+        "digests": role_digests_section(now.date()),
+        "timeline": '<div class="legend">%s</div>%s' % (legend, timeline_svg(events, activity, since, days)),
+        "runs": runs_table(runs, running),
+        "manual": '<div class="grid">%s</div>' % manual_section(manual),
+    }
+    assert set(body) == {k for k, _ in SECTION_ORDER}, "SECTION_ORDER 与 body 不一致"
+    sections = "\n".join("<h2>%s</h2>%s" % (title, body[key]) for key, title in SECTION_ORDER)
     doc = """<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>Open Company 进度报告</title>
 <style>%s</style></head><body>
 <h1>Open Company 进度报告</h1>
 <p class="meta">生成时间 %s · 统计范围 %s 起 %d 天 · 数据来自本机 cron 日志、活动日志与 digest，未联网</p>
 %s
-<h2>各角色概览</h2><div class="grid">%s</div>
-<h2>今日活动（IDE 会话与任务记录，新的在上）</h2>%s
-<h2>今日对话记录（用户与 Agent 原文，新的在上）</h2>%s
-<h2>今日各角色 digest</h2>%s
-<h2>时间线（每格 1 小时，悬停看明细）</h2><div class="legend">%s</div>%s
-<h2>Agent 运行记录</h2>%s
-<h2>手动任务（证据 digest）</h2><div class="grid">%s</div>
-<h2>产品进度（goal.md / handoff.md）</h2><div class="grid">%s</div>
-<h2>待人处理（needs-owner.log）</h2><pre>%s</pre>
-</body></html>""" % (CSS, esc(now), esc(since.date()), days, freshness(now, events, activity, chat, manual),
-                     role_cards(events, runs, activity, manual, products, running, now), activity_table(activity, now),
-                     chat_table(chat, now),
-                     role_digests_section(now.date()), legend, timeline_svg(events, activity, since, days),
-                     runs_table(runs, running), manual_section(manual), products_section(products),
-                     esc("\n".join(needs[-20:]) or "无"))
+%s
+</body></html>""" % (CSS, esc(now), esc(since.date()), days, freshness(now, events, activity, chat, manual), sections)
     out.parent.mkdir(parents=True, exist_ok=True)
     tmp = out.with_suffix(".tmp")
     tmp.write_text(doc, encoding="utf-8")

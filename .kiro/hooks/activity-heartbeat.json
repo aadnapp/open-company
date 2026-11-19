@@ -14,10 +14,10 @@
     {
       "name": "Chat capture",
       "trigger": "Stop",
-      "description": "After each Agent turn, copy new user prompts and Agent replies (text only, secrets redacted, no tool calls) from this turn's Kiro session transcript into ~/.local/state/open-company/chat/ so the progress report can show the actual conversation, not just a heartbeat.",
+      "description": "After each Agent turn, copy new user prompts and Agent replies (text only, secrets redacted, no tool calls) from this turn's Kiro session transcript into ~/.local/state/open-company/chat/ so the progress report can show the actual conversation, not just a heartbeat. Then rebuild the role digests and the HTML report (0.2 s), so the report is current after every turn instead of only at :07 each hour.",
       "action": {
         "type": "command",
-        "command": "/usr/bin/python3 /home/whole/data/src/open-company/scripts/report/capture_chat.py",
+        "command": "/usr/bin/python3 /home/whole/data/src/open-company/scripts/report/capture_chat.py; cd /home/whole/data/src/open-company/scripts/report && /usr/bin/python3 build_digests.py >/dev/null 2>&1 && /usr/bin/python3 build_report.py >/dev/null 2>&1; exit 0",
         "timeout": 20
       }
     }

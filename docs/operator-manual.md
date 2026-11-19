@@ -18,20 +18,23 @@
 |---|---|---|
 | 从上游 `munk-sh/open-company` 同步 | **人工**，按 4 节「上游同步（人工）」的 git 步骤 | 按需 |
 | 晚间盘点 `daily-patrol` | cron 自动，调用 Kiro CLI | 每天 21:00 |
-| 角色 digest + 图形化报告 | cron 自动，纯本地，不联网 | 每小时第 7 分钟 |
+| 对话摘取 + 角色 digest + 图形化报告 | cron 自动，纯本地，不联网 | 每 10 分钟（第 7、17、…、57 分） |
 | IDE 会话活动记录 | Agent 按 steering 规则记一句话；Stop hook 自动记心跳与对话原文 | 每轮回复 |
 | Weband 构建、烧录、上板验证 | **人工触发**，需要开发板在线 | 按需 |
 | 推 tag、发 Release、GitHub 回帖关单、烧录、提交代码 | **必须人确认** | — |
 
-本机网络约 **22:00 断开、09:00 恢复**。需要联网的定时任务只能排在 09:05–21:59 之间。
+本机网络约 **23:30 断开、09:00 恢复**（2026-11-17 用户更正，原记 22:00）。需要联网的定时任务只能排在 09:05–23:20 之间。
 
 ---
 
 ## 2. 每天看什么
 
 ```bash
-# 图形化报告：数据时间、各角色概览（cron 与 IDE 手动角色）、今日活动、7 天时间线、
-# Agent 运行记录、手动任务证据、产品进度、待人处理
+# 图形化报告，各节顺序固定（由 build_report.py 的 SECTION_ORDER 决定）：
+# 数据时间 → 各角色概览 → 产品待办与待人处理 → 今日活动 → 今日对话记录 → 历史对话
+# → 今日各角色 digest → 时间线 → Agent 运行记录 → 手动任务证据
+# 「产品待办」读各产品 handoff.md 的「## 待办清单」一节，格式 `- [高|中|低][状态] 标题：说明`；
+# 每次更新 handoff 都回看这一节，做完的删掉，新增的补上。
 xdg-open ~/.local/state/open-company/report/index.html
 
 # 今天的活动日志（IDE 会话记的进展 + Stop hook 心跳），一行一条 JSON
@@ -44,7 +47,7 @@ cat ~/.local/state/open-company/chat/$(date +%F).jsonl
 ls ~/.local/state/open-company/digests/$(date +%F)/
 cat ~/.local/state/open-company/digests/$(date +%F)/*.md
 
-# 需要人处理的事（Agent 写了 needsOwner: true 的场次）
+# 需要人处理的事（Agent 写了 needsOwner: true 的场次，或 Kiro 额度用尽导致任务失败的场次）
 cat ~/.local/state/open-company/needs-owner.log
 
 # 原始运行日志
@@ -63,7 +66,8 @@ cd /home/whole/data/src/open-company/scripts/report && python3 build_digests.py 
 角色概览、今日活动和时间线靠活动日志；对话原文靠对话日志，两者都由 Stop hook 自动写，不用 Agent 额外操作：
 - **一句话进展**：Agent 按 `.kiro/steering/activity-log.md` 调用 `scripts/report/log_activity.py --role <角色> --kind <start|progress|done|blocked|waiting> "<一句话>"`。角色只接受报告里登记过的（`build_report.py` 的 `ROLES` 与 `MANUAL_ROLES`），写错会报错。人也可以手动记一条。
 - **会话心跳**：`.kiro/hooks/activity-heartbeat.json`（Stop 触发）每轮回复结束调用 `log_activity.py --heartbeat`，同一工作区 10 分钟内只记一次，只记时间、工作区和 hook 输入的字段名，不记内容。心跳不区分角色。
-- **对话原文**：同一个 Stop hook 还会调用 `scripts/report/capture_chat.py`，从 Kiro 会话记录（`~/.kiro/sessions/`）里摘取这轮新增的用户发言和 Agent 的实际回复文字（不含工具调用、推理过程、附件内容），按常见密钥/口令模式做粗略脱敏后写入 `~/.local/state/open-company/chat/<日期>.jsonl`；只采集工作区属于本仓库或 Weband 仓库的会话（`capture_chat.py` 的 `WORKSPACES`），避免混入这台机器上其它项目的对话。报告的「今日对话记录」小节按时间倒序展示。
+- **对话原文**：同一个 Stop hook 还会调用 `scripts/report/capture_chat.py`，从 Kiro 会话记录（`~/.kiro/sessions/`）里摘取这轮新增的用户发言和 Agent 的实际回复文字（不含工具调用、推理过程、附件内容），按常见密钥/口令模式做粗略脱敏后写入 `~/.local/state/open-company/chat/<日期>.jsonl`；只采集工作区属于本仓库或 Weband 仓库的会话（`capture_chat.py` 的 `WORKSPACES`），避免混入这台机器上其它项目的对话。报告的「今日对话记录」小节按时间倒序展示。 同一个 hook 在摘取后立即重建角色 digest 和报告（约 0.2 s），所以每轮回复结束报告就是最新的；cron 每 10 分钟那次（先跑 `capture_chat.py`，再重建 digest 和报告）只是兜底。页面是静态文件，要看到新内容需在浏览器里刷新。
+- **workflow 运行时（2026-11-19 起）**：workflow 的每一步是单独的会话，不触发 Stop hook，没有心跳，也不即时摘取对话。各步的对话靠 cron 每 10 分钟摘取进报告；一句话进展和产品状态（`goal.md` / `handoff.md`）要由各步 Agent 自己写，规则见 `.kiro/steering/activity-log.md`「workflow 运行时」一节。发起 workflow 的会话在完成通知后负责核对、补写这两个文件。
 - 卡片上出现「IDE 会话最近活动…，此后没有记录进展」，说明会话在干活但没记一句话进展，回头补记或提醒 Agent；对话原文小节不受此影响，始终自动记录。
 - 新增手动角色：在 `build_report.py` 的 `MANUAL_ROLES` 加一行（角色、产品、证据 digest 路径或 `None`），再在 `build_digests.py` 的 `slug()` 给它一个文件名，并同步更新 `activity-log.md` 的角色列表。
 
@@ -85,6 +89,10 @@ cd /home/whole/data/src/open-company/scripts/report && python3 build_digests.py 
 | pyserial 3.5 | 用户 site-packages | `python3 -c "import serial; print(serial.__version__)"` |
 | arm-none-eabi-gcc 14.2.1 | `~/.sifli/tools/arm-none-eabi-gcc/14.2.1` | 由 SiFli SDK 安装 |
 | sftool 0.2.5 | `~/.sifli/tools/sftool/0.2.5/sftool` | 由 SiFli SDK 安装 |
+| jadx 1.5.1（APK 反编译，需 Java ≥11，当前 OpenJDK 21） | `~/tools/jadx/jadx-1.5.1/bin/jadx`（安装包 zip 在 `~/tools/jadx/jadx-1.5.1.zip`） | `~/tools/jadx/jadx-1.5.1/bin/jadx --version`。反编译时加 `JAVA_OPTS="-Xmx2g"`，输出放持久目录，多版本依次跑（规则见公司 `AGENTS.md` 第七节） |
+| Gradle 8.14.2 | `~/tools/gradle-8.14.2/bin/gradle` | `~/tools/gradle-8.14.2/bin/gradle --version` |
+
+> 工具下载不下来（网络或权限限制）时，Agent 直接告诉用户，由用户手动下载放到 `~/tools/<工具名>/`，再更新本表。
 
 ### 3.2 凭据文件 `~/.config/open-company/env`
 
@@ -163,6 +171,19 @@ git push fork main
 ### 无人值守场次的安全边界
 cron 场次里 Agent 是用 `--trust-all-tools --trust-workspace` 启动的，工具调用不再逐个确认。挡住推 tag、发版、删文件这类操作的，只有 prompt 里的规则，没有技术拦截。要收紧，在 env 里设 `KIRO_TRUST_FLAGS` 只放行指定工具。
 
+### 本机内存与交换区（2026-11-19）
+- 物理内存 7.7 GB；交换区 `/swapfile` **8 GB**（2026-11-19 从 2 GB 扩容，`/etc/fstab` 第 12 行开机自动挂载，不用改）。
+- 原因：2026-11-18 18:44 内存与 2 GB 交换全满（3 个 `java` 约 4 GB、Kiro 约 1.7 GB 等），系统卡死约 10 分钟后重启，正在跑的无人值守采样中断、`/tmp` 被开机清理（证据 Weband `evidence/digest.md` 0051 一节）。
+- 挂长时间无人值守任务时：不要同时在别的会话里跑 jadx 之类的大 Java 工具（要跑就加 `-Xmx2g`）；需要留到第二天看的中间文件不要放 `/tmp`。
+- 扩容命令（备查）：`sudo swapoff /swapfile && sudo fallocate -l 8G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile`，用 `swapon --show` 核对。
+
+### whoopsie 占满 CPU（2026-11-19）
+- 现象：`whoopsie -f` 持续 99% CPU，已累计约 17 小时（`ps -o pid,etime,time,pcpu -C whoopsie` 查看）。
+- 原因：它卡在上传 `/var/crash/_usr_share_kiro_kiro.1000.crash`（30 MB，2026-11-18 15:19 Kiro 崩溃留下）。日志停在 `Uploading`，没有后续。
+- 处理（需要 sudo，由人执行）：`sudo systemctl stop whoopsie`；把 `.crash` 移到 `~/` 备份，再 `sudo rm -f` 同名 `.upload`；不需要上传就 `sudo systemctl mask whoopsie`。
+- 那次 Kiro 崩溃的判断：报告里 `Signal: 5` 只是 Chromium 的 `FATAL: GPU process isn't usable` 收尾退出。15:19:28 同一时刻 `ptyHost`、两个 `extensionHost`、`shared-process` 都以 code 15（SIGTERM）结束，说明整个进程树被外部终止。系统日志里没有 OOM 记录，终止者查不到。同一秒 `tracker-miner-fs` / `tracker-store` 刷 `database is locked`，机器当时负载很高。
+- 之后 18:44 的 OOM 是另一次事件，见上一节。
+
 ---
 
 ## 5. 在 Kiro IDE 里手动触发任务
@@ -199,6 +220,18 @@ scripts/build.sh                                   # 默认编 hello_world，板
 scripts/build.sh <工程目录> sf32lb52-weband          # 编其它 SCons 工程
 ```
 `build.sh` 会检查 SDK 是否在固定 commit `87d5700a`，不在就拒绝编译。产物在 `<工程目录>/build_sf32lb52-weband_hcpu/`。
+
+V1 固件（`app/project`，板 `sf32lb52-weband-v1`）有两种构建（2026-11-18 用户定：产品用按键配对，开发阶段可从串口看配对码）：
+
+```bash
+scripts/build.sh app/project sf32lb52-weband-v1                          # 正式版：不打印配对码，配对靠单击电源键（button_confirm）
+WEBAND_DEV_PAIR_CODE=1 scripts/build.sh app/project sf32lb52-weband-v1   # 开发版：原版 App 输码配对时，码打到串口
+```
+- 开发版编译时会打印 `Do not ship`，开机日志有 `development build: pairing codes are printed on the console`，`fw` 命令也会显示。不要把开发版交给用户。
+- 串口里的配对码是 `I/mb_plat main: pair code NNNNNN`，300 秒有效、用一次失效。写进证据或文档前替换成 `****`。
+- 广播名（2026-11-18 用户定）：正式版 `Weband-XXXX`；开发版自动用原版 App 认的前缀，名字从仓库外的 `~/.config/weband/adv_name` 读（参考设备名不入库，文件不存在时开发版退回 `Weband` 并在编译时提示）。`WEBAND_ADV_NAME=…` 可临时覆盖两者。
+- 两种构建都上报 `hw=2`、`fw_version` `2.15.35`（原版 App 据此走按键配对）。
+- `WEBAND_KEY_DEBUG=1`：串口记每次按键按下/松开与按住时长（开发排查用）。
 
 ### 6.3 烧录（会改写板子 Flash，先确认）
 
@@ -293,7 +326,7 @@ sha256sum 0003_factory_backup/factory_flash_first4MB.bin                # 先核
   git -C /home/whole/data/reawork/weband worktree add .worktrees/<名字> -b <分支名> main
   ```
 - 推到远端前：把 `sifli-sdk` 子模块的 URL 改回官方地址（当前指向本地 `.git/modules`）。
-- **参考设备的名称和相关标识不进远端**（2026-11-13 用户要求，两仓历史已于当天改写并强推：Weband `origin/main` `008b597`→`bcb389a`，open-company `fork/main` `df29ded`→`db25849`）：
+- **参考设备的名称和相关标识不进远端**（2026-11-13 用户要求，两仓历史已于当天改写并强推：Weband `origin/main` `008b597`→`8085c80`，open-company `fork/main` `df29ded`→`db25849`）：
   - 本机资料目录用中性别名 `/home/whole/data/reawork/refdevice`、`refdevice-v1`、`refdevice-files/`（都是符号链接；真名与来源只记在本机 `refdevice-files/SOURCES.txt`）。文档、代码注释、提交说明一律写「参考设备」、`sf32lb52-refboard-v1`、"App 的 BLE 同步类"这类中性写法。
   - 两个仓库都装了本地 git hook，拦截含这些标识的提交内容、提交说明和推送（`--no-verify` 跳过提交检查的，推送时仍会被拦）。hook 不在仓库里，**新 clone 后要重装**：
     ```bash
@@ -416,7 +449,9 @@ sudo modprobe -r btusb && sudo modprobe btusb
 | 出现 `msh />msh />` | 用了 `--eol CRLF` | 改成 `--eol CR` |
 | 命令被截断、`command not found` | 一次粘贴了多行 | 一条一条打 |
 | guard 返回 1 但其实没检查 | 系统 node v10 跑不了 ES module，或没装 `gh` | 确认 env 里 `NODE_DIR` 正确；`run-task.sh` 会先检查，不满足时以 127 退出 |
-| 夜间日志全是 `gh ETIMEDOUT` | 本机 22:00–09:00 断网 | 需要联网的任务不要排在这个时段 |
+| 夜间日志全是 `gh ETIMEDOUT` | 本机 23:30–09:00 断网 | 需要联网的任务不要排在这个时段 |
 | `KIRO_API_KEY not set`（退出码 78） | env 文件没填或没权限读 | 见 3.2 |
 | 烧录 `sftool` 连不上 | 串口被占用，或板子没接好 | 先查 `fuser`；重新插拔 USB-C 后看 `ls /dev/ttyUSB*` |
+| `whoopsie` 长时间 100% CPU | 卡在上传 `/var/crash` 里的大崩溃报告 | 见第 4 节「whoopsie 占满 CPU」 |
+| Kiro 突然退出，崩溃报告 `Signal: 5` | 多半是子进程被外部 SIGTERM 后 GPU 进程不可用，不是 Kiro 自身 bug | 查 `journalctl` 里同一时刻的 OOM 和进程终止记录，见第 4 节 |
 | 晚间盘点把产品标成 blocked | `goal.md` / `handoff.md` 缺失或太久没更新 | 更新产品目录下这两份文件 |
