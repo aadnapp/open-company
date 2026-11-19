@@ -1,26 +1,54 @@
 # Weband 交接记录
+最近更新：2026-11-19（录音按小时一个文件 + Nano 实测修复已合入本地 main `6ce68e5`，Nano 实测通过，V1 未烧录）
 
-最近更新：2026-11-16（V1 实物整片 NOR 只读备份）
-
+- **录音按小时一个文件（2026-11-19，Weband `01a195e`，已快进合入本地 `main`，未推送、未发版）**：与参考设备一致，每个 UTC 小时一个 `M.D.HH.opus`，带分段表；灵感录音单独成文件，ACK 与清理按小时文件处理。主机单测全绿（test_hour 12/12），V1 构建通过，证据 `evidence/0056_hourly_rec_build/`。**没有烧录，上板验证等用户确认**（待测：整点跨小时、App 同步按小时文件、重启续写）。
+  - 代码评审 APPROVED，留 4 条非阻塞发现（Weband `.agents/tasks/hourly-rec/review.md`）：① 某个旧 `NNNNNN.ogg` 读失败后，本次开机剩下的旧文件都不再上传（建议只在没有旧文件时才停）；② 从 TF 文件恢复的时钟标为 stale、不参与命名，比设计 §4 保守；③ `mb_clock_set` 超过一天未读时总是重设基准，休眠一天以上的路径待确认；④ 上板项未验证：RTC 休眠保持、`file_spans` 帧与 `srcMs`、`duration_ms`、文件间空档 < 200 ms、掉电续写、`ftruncate`/长文件名（设计 §14 第 1 步要先上板确认）。
+  - **Nano 实测（2026-11-19，Weband `evidence/0057_nano_hourly_rec/`）**：`01a195e` 的 `file_spans` 用了 MBF1 类型 3，App 当成 `file_end` 回 error 并重连；一个旧文件读失败后，所有旧文件都停传。修复 `6ce68e5` 已快进合入本地 `main`（未推送；Nano 现跑这一版，V1 正式版编译通过、未烧录）：一次连接传完 217 个文件、0 error，文件间空档 6–32 ms；跨整点、热重启续写、清理通过。未测：空小时文件、App 同步时状态是否还跳（用户暂不看）、V1 上的 SD NAND 行为。
+  - 文件名的"时"是 UTC；`file_start` 带 `start_ts`，App 用它显示本地时间。从未校时期间文件名 `REC_<n>.opus` 是推断（设计 §13）。
 ## 现状
+- **充电采样 `0051`（2026-11-18 18:24 起，中断）**：V1 插着充电器（开发版 `7c8be8e9…`），18:26 `charging` 1→0、`full` 0→1（4191→4170 mV），不用复位就能置位。采样计划到 23:30，18:55 电脑内存耗尽重启而中断（3 个 java 进程约 4 GB，来源未明；交换区已扩到 8 GB），只留 `batt.csv` 23 行；原始串口日志在 `/tmp`，已丢。19:16 读板：vbat 3811 mV、vbus=0、full=1，充电器已不在。回充行为未测。证据 `0051_v1_charge_full/`、`evidence/digest.md` 同日一节。
+- **周边（团队级）**：cron 晚间盘点 11-17、11-18 两场失败，原因是 Kiro 月度用量用完，不是 Weband 问题（见 `projects/daily-patrol/digest.md`）。
+- **回充采样 `0053_v1_recharge/`（2026-11-19 12:18 起，进行中）**：V1 插着充电器（开发版 `f183cf7a…`，含 `device-report`），`battery_log.py` 增量写 `batt.csv` 和 `raw_unredacted.log`（含配对码与令牌，不入库），上限 6 h，约 18:20 结束。期间不要烧录、复位或拔充电器；要看恒流转恒压和插着充电器时 `full` 何时置位。电脑重启后可手动重跑脱敏。
+- **`device-report` 已上板验证（2026-11-19，`0052_v1_device_report/`）**：已快进合入 `main` 并推送（`origin/main` = `1ea7860`）。开发版 main.bin `f183cf7a…`，用户用 App 1.4.0 验证重连鉴权、电量与充电状态显示、插拔充电器时状态刷新，三项正常（用户口述）。`device_diag` 未做。
+- **电量百分比充电补偿（2026-11-19，未合入、未上板）**：用户观察充电时 App 41%、拔掉后 20%。原因：百分比由电池电压查放电曲线表，充电电流抬高端电压约 65–70 mV。分支 `batt-pct-comp`（`82f6139`，worktree `.worktrees/batt-pct-comp`）：充电时 `mv-65` 查表且封顶 99，充电器报 full 时 100。主机单测 92/92，V1 编译通过。补偿量来自一次恒流段观测，等回充全曲线核对后再合入烧录。
+- **`transfer_skip` 已在 Nano 上台架通过（2026-11-19，`evidence/0054_nano_transfer_skip/`）**：分支 `transfer-skip`（已变基到新 main，`d12f469`），未合入。Nano main.bin `5d54c0ef…`，`scripts/ble_skip_check.py` 23/23 通过；第 8 步（已配对板上未鉴权回 `auth_required`）因板子未配对跳过。待办：已配对场景、原版 App 1.5.0 实测、V1 上板（回充采样结束后）；合并时注意与 `batt-pct-comp` 在 `test_main.c` 的场景登记行有小冲突。
+- **Nano 上的 App 与固件检查（2026-11-19，`evidence/0055_nano_app_checks/`）**：App 1.4.0 与 1.5.0 都能在 Nano 上按键配对（一次单击）、同步录音（65 个 / 41 s，同一连接）；升级页「已是最新」，串口无 `arm_ota`，`denied` 路径未触发；App 没有发 `skip_add`（`skip_add` 路径只有台架脚本验证）；`ACKED.txt` 压缩正常路径通过（掉电中途分支未验证）；灵感录音立即超时 5/5 未复现（10 次单击 = 5 个来回，样本偏少）。App 解绑时若设备在线会把 `unpair` 发给设备（Nano 实测）；设备不在线时解绑只清 App 记录，设备仍是已配对（V1 现状）。
+- **换绑时单击误开灵感录音（2026-11-19，用户定不改）**：Nano 换绑时一次窗口外的单击（App 还没发按键配对或窗口已过）开了灵感录音，配对窗口内的单击按设计只确认配对。用户决定不动代码。
+- **Nano 启动断言已修（2026-11-19，Weband `3ab1b65`，已快进合入本地 `main`，未推送）**：SD NAND 合入（`c8d54cc`）后 proj.conf 对所有板级开了 `spi_msd`（spi1），Nano 没有 spi1，开机断言。改为应用 Kconfig `WEBAND_SD_NAND`（depends on `BSP_USING_SPI1`）。V1 构建配置只多该符号，dfu/bootloader/lcpu 不变；V1 未烧录这一版。Nano 现跑 transfer-skip 开发版（`WEBAND_DEV_PAIR_CODE=1`，广播名用 App 认的前缀，main.bin `225eeec3…`，开发版台架 23/23 通过），录音在 NOR，开机迁移 65 段用了约 8.4 s（日志时间戳为 32768 Hz 计数，不是 ms）。
+- **能力 `caps` 三项核对（2026-11-19）**：协议、状态串与工作量见仓库外 `refdevice-files/analysis/caps-night-storage-skip.md`。建议顺序 `transfer_skip`（小）→ `storage_clear`（中）→ `night_schedule`（大，需墙钟与 RTC 唤醒）。等用户定做哪几项。
+- **能力上报 `device_settings` / `device_event`（实现说明；已合入、上板验证见上方）**：Weband 分支 `device-report`（`1ea7860`）。`status_request` 现回 `device_features`、`device_status`、`device_settings`；鉴权后（或未配对的开放链路）每 5 s 查一次电池，充电或充满状态翻转、百分比变化 ≥2 时发 `device_event`（`seq`、`charging`、`battery_percent`、`full`），每条新链路第一次只记基线不发。主机单测 91/91（新增 S90–S92），V1 正式版构建通过，无新警告。字段格式来自 V1 固件字符串；取值（夜间 0/0、`vad_gate`、`buzzer_level` 0）与 `full`（vbus 且 PMU full）是自有定义，代码里标了 `TODO(weband)`。`device_diag` 未做。App 即时刷新已上板验证；`full` 规则等回充采样验证。
+- **阶段 1 原版 App 互通（2026-11-18）**：oppo 手机 + App 1.4.0 走通发现连接、输码配对、鉴权、状态显示（电量 23%、版本 1.15.35）、录音同步（50 多段）、解绑。证据 Weband `evidence/0046_v1_app_interop/` 与 `digest.md` 同日一节。
+  - 修了三处才连得上：① 广播没带服务 UUID，App 扫描过滤掉了；② 缺 App 写命令用的控制特征 `…ef2`，App 连上后一条命令也不发、超时；③ 补 `status_request` → `device_status`（`hw`=1、`fw_version` 1.15.35，用户定），App 的 `arm_ota` 回 `denied`，升级包不装。
+  - **V1 现跑台架版** main.bin `fcec5d93…`：配对码打到串口（本地 `CONFIG_WEBAND_LOG_PAIR_CODE`，未提交），广播名用参考设备名前缀（用户要求；值在仓库外 `~/.config/weband/adv_name`，构建时 `WEBAND_ADV_NAME=…`）。设备当前未配对。
+  - "正在验证设备"循环（2026-11-18）：App 1.4.0 鉴权后等 `device_features`，没有时 9 s 探测先拆链。已改为 `status_request` 后补回 `device_features`（`caps:[]`），提交 `0d52b20`，已烧录；手机复测通过（关开蓝牙后约 1.4 s 发出 `ready`，无探测超时，`evidence/0046_v1_app_interop/app_logcat_after_features.txt`）。V1 现跑 main.bin `a9c680df…`（仍是台架版：打印配对码 + 本地广播名）。已推送 `origin/main` = `73447b6`（2026-11-18，普通推送）。caps 各项待办见 `goal.md` 遗留 2b。
+  - 无屏配对已定（2026-11-18 用户）：产品用按键配对（`button_confirm`），开发阶段可从串口看配对码。Weband `948150c`：`WEBAND_DEV_PAIR_CODE=1` 编开发版（打印配对码），默认正式版不打印。`6db9588`：正式版收到输码配对回 `unsupported_method`（用户定）。**V1 现跑开发版** main.bin `a85f04e5…`（`evidence/0047_v1_dev_build/`，用户定）。Weband 本地 `main` 比 `origin/main` 多 5 个提交，未推送。正式版不能用原版 App 配对；差异分析发现原版 App 在 `hw=2` 且 `caps` 含 `button_pair` 时会走按键配对，是否这样做待用户定（`goal.md` 阶段 2）。
+  - **原版 App 按键配对实测通过（2026-11-18 16:42）**：实验开发版（`hw=2`、`fw_version` 2.15.35、`caps:["button_pair"]`，main.bin `53320156…`，V1 现跑这一版）上，App 1.4.0 发 `button_confirm`，单击电源键后配对成功（`evidence/0048_v1_hw2_button_pair/`）。17:00 前后 `hw=2` 下其余步骤全部复测通过（`evidence/0049_v1_hw2_full_check/`）。用户随后定：正式版与开发版都默认 `hw=2` / `2.15.35`（`68a9010`）；灵感录音偶发立即超时已修（同提交，`elapsed_ge` 负差）；广播名开发版自动用 App 认的前缀（读仓库外 `~/.config/weband/adv_name`）、正式版 `Weband-`（`ba0eec3`）。**V1 现跑新开发版** main.bin `7c8be8e9…`（`evidence/0050_v1_dev_hw2_default/`），启动后手机自动重连鉴权。已推送 `origin/main` = `a2583d8`（2026-11-18，普通推送）。
+  - 原版 App 差异分析（2026-11-18）：1.3.1 → 1.4.0 → 1.5.0，原生 BLE 模块部分，报告在 `/home/whole/data/reawork/refdevice-files/analysis/app-diff-1.3.1-1.4.0-1.5.0.md`（不入库）。1.4.0 安装包已从 `refdevice-v1/` 移到 `refdevice-files/`，1.5.0 在 `refdevice-files/`。
+  - 主机 BlueZ 缓存旧 GATT 时 bleak 报 KeyError，`bluetoothctl remove <地址>` 后正常；手机同理要取消配对再连。
+  - 台架脚本：`scripts/ble_status_check.py`（device_status、App 式 arm_ota 被拒）；台架 OTA 改发 `{"type":"arm_ota","dev":true}`。按名字过滤 `Weband-`，本地改名构建下要改前缀。
+- **SD NAND 根目录满导致停录，已修复（2026-11-18）**：V1 从 11-17 傍晚（0037 之后）到 11-18 上午 0 次成功开段，整夜没录音。原因（0041 `sddiag` 证实）：卡是 FAT16，根目录固定 512 项，511 段录音 + `ACKED.txt` 占满；裁剪只看空间不触发。修复：录音改放 `/weband/rec/r/`（`ed5433d`），开机迁移 510 个、自动删最老已 ACK 的 `000001.ogg`（电脑有副本）腾项；裁剪加文件数上限 4000。V1 实测开段恢复、BLE 拉取 17/17（`0042_v1_rec_subdir/`）。已合入 `main` 并推送（`origin/main` = `87b2059`）。V1 现跑这一版（main.bin `f7b5da29…`）。未测：改名中途掉电、文件数裁剪、Nano 路径。SDK `dfs_elm_mkfs` 的 `MKFS_PARM opt` 未初始化（另记，未改）。
+- **录音改存 SD NAND（2026-11-17 上板通过，已合入 Weband `main` 并推送，`origin/main` = `24fe09e`）**：原分支 `board-weband-v1` 变基后快进合入，worktree 与分支已删，变基前备份分支 `backup-board-weband-v1-pre-rebase`，V1 上跑 main.bin `e2c67fa3…`。SD NAND 挂到 `/weband/rec`，`df` 119.9 MB；重启后已关闭的段还在；BLE 拉取 25/25。证据：Weband `evidence/digest.md` 2026-11-17 一节、`evidence/0032_v1_sdnand/`。
+  - 修了两处：板级打开 LDO3（推断 `VDD33_VOUT2` = `VDD33_SDCARD`）；DFS 挂载表从 2 改为 4。
+  - **数据丢失**：第 2 次烧录时，挂载表满被误判成"卡上没有 FAT"，SD NAND 被格式化，原厂固件写在卡上的内容没有备份，已经清掉了。现在只在扇区 0 没有 0x55AA 签名时才格式化。
+  - 遗留已处理（2026-11-17，`evidence/0033_v1_sd_migrate/`）：开机把 NOR `/weband/rec` 里的录音迁到卡上，203 个全部迁移，SHA-256 逐个核对无缺失，NOR 空闲回到 3.9 MB；休眠前封口录音并关 LDO3：2026-11-17 台架版实测通过（`evidence/0034_v1_hibernate_seal/`，封口后的段大小与日志一致、能解码，`ldo3_en=0`）；休眠时串口乱码已定位并修复（台架打印在 NOR 断电后从 NOR 执行；现先关 LDO3 再关 NOR 供电，复测无乱码、电源键唤醒，`evidence/0035_v1_hibernate_uart/`）。V1 上跑正式版 `77e824b8…`，正式版休眠尚未在实物上触发过。LDO3 对应关系仍无文档依据。
 - **V1 实物整片备份（2026-11-16，上 Weband 固件分步方案第 1 步）**：V1 经 USB-C 转 TTL 转接板接 `/dev/ttyACM0`，用 `sftool read_flash` 只读读出 16 MB NOR，SHA-256 `db02fe1a…84acb917`，存仓库外 `/home/whole/data/reawork/refdevice-v1/flash_backup/v1_nor_full_16MB.bin`（不入库）。bootloader 与手头原厂镜像一致，main、dfu 不一致（V1 上是别的版本），还原只能用这份备份。读完 V1 自动重启，运行正常。记录在 Weband `evidence/digest.md`（未提交）。
-  - 第 2 步已完成（只编译）：板级 `sf32lb52-weband-v1` 在 Weband worktree `.worktrees/board-weband-v1`，分支 `board-weband-v1` 提交 `7d63b0d`，未合入 `main`。525、8 MB PSRAM `MPI1_MODE_3`、片内充电、引脚按 V1 网表核对；电池保护（自有定义）：4200/4350 mV、120 mA，开机 <3500 mV、运行中 <3400 mV 无充电器即休眠。PSRAM、VBAT 读数、充电、休眠都未上板验证。
-  - 第 3、4 步已完成（2026-11-16，用户逐步确认后烧录）：先只写探测固件 main.bin（方案 B），V1 原 bootloader 能引导，PSRAM 8 MB 0 错，PA34 电源键可读，10 s 强制复位通过；再 4 个镜像全刷完整 Weband（方案 A，提交 `74f3566` 构建）。V1 上实测：开机、V1 模拟麦录音、BLE 广播 `Weband-44D1`、按键配对 → 鉴权 → 拉 16 段录音 69/69 → 解绑回开放模式、单击录灵感和 60 s 超时关闭，全部通过。证据在 Weband `evidence/digest.md` 与 `evidence/0026_v1_ble/`、`evidence/v1_*.log`（未提交）。
+  - 第 2 步已完成（只编译）：板级 `sf32lb52-weband-v1` 在 Weband worktree `.worktrees/board-weband-v1`，分支 `board-weband-v1` 提交 `1263e2a`，未合入 `main`。525、8 MB PSRAM `MPI1_MODE_3`、片内充电、引脚按 V1 网表核对；电池保护（自有定义）：4200/4350 mV、120 mA，开机 <3500 mV、运行中 <3400 mV 无充电器即休眠。PSRAM、VBAT 读数、充电、休眠都未上板验证。
+  - 第 3、4 步已完成（2026-11-16，用户逐步确认后烧录）：先只写探测固件 main.bin（方案 B），V1 原 bootloader 能引导，PSRAM 8 MB 0 错，PA34 电源键可读，10 s 强制复位通过；再 4 个镜像全刷完整 Weband（方案 A，提交 `3934534` 构建）。V1 上实测：开机、V1 模拟麦录音、BLE 广播 `Weband-44D1`、按键配对 → 鉴权 → 拉 16 段录音 69/69 → 解绑回开放模式、单击录灵感和 60 s 超时关闭，全部通过。证据在 Weband `evidence/digest.md` 与 `evidence/0026_v1_ble/`、`evidence/v1_*.log`（未提交）。
   - V1 现在跑的是 Weband，原厂固件可用 `refdevice-v1/flash_backup/v1_nor_full_16MB.bin` 整片写回。
-  - 待用户决定：分支 `board-weband-v1` 是否合入 `main`；600 ms–6 s 的按压是否补日志；录音改走 V1 的 SD NAND（现在仍写 NOR `fs_region`）；拔掉 Type-C 充电器测电池保护和续航。
+  - 已了结（2026-11-17）：600 ms–6 s 的按压已有日志（`main.c` 的 `MB_KEY_IGNORED` 分支打印按住时长）；录音改走 SD NAND 已完成；拔掉充电器测电池保护和续航已完成（见下方电池测试，`0027_v1_batt/`）。
   - 接法（2026-11-16 用户确认）：转接板接 V1 的 3 针调试口（网表 U7：GND / TXD / RXD，不供电）；Type-C 另插充电器在充电。V1 的 Type-C D+/D- 和 3 针口并在同一对串口线上（A6/B6=TXD，A7/B7=RXD），CC 各有下拉电阻。整片备份就是在这个接法下读成功的，说明这个充电器不干扰串口，换充电器前要重新确认。
-  - 续航和电池保护测试暂缓：Type-C 充电器插着，要拔掉才能测。
+  - 电池测试已完成（2026-11-16 至 17，正式版，证据 `0027_v1_batt/`）：放电 10.4 h 后低电休眠（3377 mV），电源键唤醒、开机低电保护、充电器唤醒都走通；平均电流约 37–41 mA（推算）；录音区清理触发 6 次，录音没停。充电恒流 3.1 h + 恒压 1.8 h，一直没报充满（待办已记 `goal.md`）。电池标签 502525、3.7 V、450 mAh，带保护板（充电截止 4.25 V，放电截止 2.75 V）。
 - **硬件工程去屏幕（2026-11-16）**：新建本地仓库 `/home/whole/data/reawork/weband_hw`（独立 git，未设远端），`weband.eprj2` 是参考设备 V1 开源工程的副本，用 `lceda-pro` 命令行修改：删 LCD 页和 12 个器件，U1 的 15 个 LCD 引脚改 No Connect，PCB 导入变更并清掉屏幕走线、残线，重建铺铜。原理图 DRC 仍是原有 16 条 warn；PCB DRC 通过，飞线 0 条。存储（SD NAND、NOR）未动，**未在 dev nano 上调试**。证据：`weband_hw/evidence/`（`25_netlist_diff.txt`、`30_connectivity_check.txt`、`32_pcb_final.json`），提交 `95fbdfb`（历史已重写，见下）。
   - 红线处理（2026-11-16 用户决定）：① `weband_hw` **只在本地保存，不设远端、不推送**，因为工程派生自 V1 开源设计，授权未确认；② README、提交说明、`evidence/03_src_info.json` 改为中性写法，本地历史已用 `filter-branch` 重写，现 `main` = `5ba782a`。工程文件内部仍带参考设备名，属于设计内容本身，仓库不外传，所以不改。重写前的备份分支 `backup-before-neutral` 和 `refs/original` 已按用户确认删除并 gc，旧提交已不可达。
-- **M4 电源键部分：已完成（2026-11-13）**，已快进合入 Weband `main` 并推送（`origin/main` = `f1de797`），worktree 与分支已清理，不入库的镜像与升级包已移到主仓 `evidence/0021_m4_power_key/`。板上跑 build 3（BLE OTA 装上），开放模式。证据：Weband `evidence/digest.md` 2026-11-13 M4 一节、`evidence/0021_m4_power_key/`。
+- **M4 电源键部分：已完成（2026-11-13）**，已快进合入 Weband `main` 并推送（`origin/main` = `868654a`），worktree 与分支已清理，不入库的镜像与升级包已移到主仓 `evidence/0021_m4_power_key/`。板上跑 build 3（BLE OTA 装上），开放模式。证据：Weband `evidence/digest.md` 2026-11-13 M4 一节、`evidence/0021_m4_power_key/`。
   - 单击灵感（默认 60 s，`idea_toggle` / `idea_config` 按 V1）、双击重新配对（清令牌和 BLE 绑定后重启，录灵感时延后）、长按 6 s 重启、延后遇长按先解绑，都已实测。
   - 实测中修了两处：延后的重新配对会被长按重启丢掉；全新配对后第一次连接 App 层配对被拒（SDK 不发加密事件）。
   - 台架脚本连接改为 `connect_live`（老 BlueZ 扫描停止即删未绑定设备）。
   - V1 原理图：电源键 PA34 高有效（SKRTLAE010）；无蜂鸣器；SD NAND 走 SPI，接 PA24/25/28/29，Nano J1 有这四个脚。
-  - 无屏配对已定（2026-11-13）：**真实用户通过按键完成配对**（按 V1 的 `button_confirm`）。固件侧已真机通过（2026-11-14）：用户单击 KEY1 约 39 s 后配对成功并拿到令牌；不按则 60 s 后回 `expired`。已合入 Weband `main` 并推送（`55a23f5`），worktree 已清理。原版 App 不发这种方式，需要我们自己的 App 配合。
+  - 无屏配对已定（2026-11-13）：**真实用户通过按键完成配对**（按 V1 的 `button_confirm`）。固件侧已真机通过（2026-11-14）：用户单击 KEY1 约 39 s 后配对成功并拿到令牌；不按则 60 s 后回 `expired`。已合入 Weband `main` 并推送（`726f78e`），worktree 已清理。原版 App 不发这种方式，需要我们自己的 App 配合。
   - 待办（2026-11-13 用户提出）：**用敲击或"敲击 + 划动"组成的莫斯码完成配对**；识别用什么传感器、码怎么生成和比对都待定，见 `goal.md`。
 - **硬件范围（2026-11-13）**：对标 V1，但 **Weband 不要屏幕**。V1 器件按其开源硬件页更新：SF32LB525UC6、128 MB SD NAND 存录音、16 MB SPI NOR、502525 电池、IMU 在板但固件不用。M4 改为只做电源（电源键 + 充电）。
-- **M3 录音已完成（2026-11-13）**：已快进合入 Weband `main` 并推送（`origin/main` = `97ec141`），worktree 与分支已清理；工作树外的录音文件（`.ogg` / `.wav` / `fs_region.img`，不入库）已移到主仓 `evidence/` 下。板上跑 `main.bin` `5c0c03cf…0fd9`，处于开放模式（未配对）。
+- **M3 录音已完成（2026-11-13）**：已快进合入 Weband `main` 并推送（`origin/main` = `f83c252`），worktree 与分支已清理；工作树外的录音文件（`.ogg` / `.wav` / `fs_region.img`，不入库）已移到主仓 `evidence/` 下。板上跑 `main.bin` `5c0c03cf…0fd9`，处于开放模式（未配对）。
   - 录音：WebRTC VAD 门控（余量 8 dB、触发 6 帧）+ Opus SILK 16 kHz 24 kbit/s，60 s 一段写 `/weband/rec/NNNNNN.ogg`。
   - 存储：已用超过 2/3 开始裁剪（用户定），先删已传到手机的（`ACKED.txt`），再删最旧的，删到剩余 1/3 + 256 KB；5 分钟 fsync（用户定）；开机删空文件。实测：先删 9 个已 ACK、再删 3 个最旧，丢帧 0。
   - BLE 传录音：按原版 App 1.3.1 的 `ready` / `ack` + MBF1 帧实现。台架脚本 `scripts/ble_pull_check.py` 实测：基本拉取、丢块重传、断线续传都通过，206 个积压文件一次拉完 829/829。
@@ -41,21 +69,43 @@
 - 远端：`origin` = `git@github.com:aadnapp/weband.git`（私有）。2026-11-10 已推送 `main`，远端与本地同为 `a6f1c46`。
 
 - M2 开工（2026-11-11）：worktree `/home/whole/data/reawork/weband/.worktrees/m2-ble-protocol`，分支 `m2-ble-protocol`（基于 main `606e0fa`）。提交 `5998086`：把我们早先示例的协议核心（mb_proto / mb_frame / mb_hmac）和主机单测移到 `app/`，`make -C app/test/host check` 72/72 通过。GATT / 存储 / 平台胶水（原 b2074d76）尚未移植。
-- **M2 已完成（2026-11-11）**：已快进合入 Weband `main` 并推送（`37fcb56`），worktree 与分支已清理。协议按 V1 对齐（只核对 M2 命令），主机单测 75/75；真机 BLE 联调 `scripts/ble_m2_check.py --reboot --unpair` 17/17：pair → auth → ok、未认证 arm_ota 回 auth_required、认证后 armed、令牌跨复位有效、远程 unpair。修了两处上板问题：TRNG 未播种导致 rng_error；BlueZ 的 Just Works 需要 agent 授权（脚本自带 D-Bus agent）。（板上现在跑的是 M3 固件，见上。）
+- **M2 已完成（2026-11-11）**：已快进合入 Weband `main` 并推送（`57d10b1`），worktree 与分支已清理。协议按 V1 对齐（只核对 M2 命令），主机单测 75/75；真机 BLE 联调 `scripts/ble_m2_check.py --reboot --unpair` 17/17：pair → auth → ok、未认证 arm_ota 回 auth_required、认证后 armed、令牌跨复位有效、远程 unpair。修了两处上板问题：TRNG 未播种导致 rng_error；BlueZ 的 Just Works 需要 agent 授权（脚本自带 D-Bus agent）。（板上现在跑的是 M3 固件，见上。）
 - 联调用 UGREEN 蓝牙适配器（RTL8761B），靠补丁版 btusb + 手工放的 rtl8761bu 固件才能用，见操作手册 6.8；换内核要重做。
-- 两仓 2026-11-11 均已推送：Weband `origin/main` = `37fcb56`；open-company `fork/main`。
+- 两仓 2026-11-11 均已推送：Weband `origin/main` = `57d10b1`；open-company `fork/main`。
+
+## 待办清单
+<!-- 进度报告「产品待办」只读这一节。格式：- [高|中|低][状态] 标题：说明。状态写 进行中 / 等用户 / 待定 / 排期。做完的条目直接删掉并写进「现状」，不要留划掉的。每次更新 handoff 都回看这一节。 -->
+- [高][等用户] 按小时录音上 V1 验证：`hourly-fix` 已合入本地 main，Nano 实测通过（217 个文件一次传完、跨整点、续写）；V1 正式版已编译未烧录，待测空小时文件、App 同步状态、V1 上 SD NAND 行为。
+- [高][进行中] 回充采样 `0053` 收尾分析：看恒流转恒压、插着充电器时 `full` 何时置位；`full` 需与 `vbus` 联合判断后再改上报。
+- [高][等用户] 电量百分比充电补偿（分支 `batt-pct-comp`，单测 92/92）：等回充全曲线核对补偿量后合入、烧录 V1。
+- [高][等用户] `transfer_skip` 上 V1：Nano 台架 23/23，待已配对场景、App 1.5.0 实测、V1 上板；合并时与 `batt-pct-comp` 在 `test_main.c` 登记行有小冲突。
+- [高][待定] 设备能力 `storage_clear`（中）、`night_schedule`（大，需墙钟与 RTC 唤醒）做不做；用户已定先做 `transfer_skip`。
+- [高][等用户] 本地 `main` 比 `origin/main` 多若干提交（按小时录音、`hourly-fix`、启动断言修复等）未推送，推送前向用户确认。
+- [中][待定] 阶段 2 复现参考设备 App：范围、技术栈、代码仓库、与阶段 1 的先后都待用户定；启动时还要改 `AGENTS.md`「本阶段不做手机端 App」。
+- [中][待定] 无蜂鸣器：配对确认、录音开关、重新配对、低电量、OTA 的 LED（PA31/PA32）闪法和是否加振动。
+- [中][待定] 莫斯码配对：IMU + 麦克风识别已定，码由谁生成、谁比对、与按键确认的关系待定。
+- [中][排期] 功耗偏高（平均约 37–41 mA，构建无 `RT_USING_PM`）：先用电流表实测，再单独立项。
+- [中][排期] 主控降配评估：523UB6 与 525 只差 PSRAM 容量，改动最小；520U36 需核实启动与分区；不阻塞打样。
+- [低][排期] M5 OTA 遗留：离线包不签名、板上 `rt_tick` 慢约 1%、安装器两条告警、安装中掉电续装未实测；量产前换自有签名密钥。
+- [低][排期] 掉电类未实测：`ACKED.txt` 原子替换掉电中途、迁移改名中途掉电、文件数裁剪、正式版休眠在实物上触发。
+- [低][排期] 小项：`device_diag` 未做；App 1.5.0 升级入口未实测；评审 4 条非阻塞（旧文件读失败后停传、时钟 stale 策略等）；门控遗留（单字召回无旧基准、嘈杂背景误开段）；`dfs_elm_mkfs` 的 `MKFS_PARM opt` 未初始化（SDK，未改）。
 
 ## 等待项（等人）
-1. 采购 P1 外设（见 `goal.md`），不阻塞 P0。按 V1、不要屏幕（2026-11-13）：麦已有（3037 模拟麦）；不再需要屏。录音存储要 SD NAND / SD 卡模块（或按 V1 开源设计打板），充电要锂电版芯片的板子 + 锂电池（V1 为 502525），是否购买或打板待用户决定。不再需要 PDM 麦、JD7601、LGS4056、JDI 屏。
-4. 用户决定：无屏后 `MBWP` 壁纸帧在线协议上怎么处理（照收丢弃，或回不支持）。
+1. ~~采购 P1 外设~~ 已定（2026-11-17 用户）：硬件直接采用参考设备 V1，固件刷 `sf32lb52-weband-v1` 板级；不再为 Nano 采购 SD 卡模块或锂电版开发板，也不单独打板。
+4. ~~`MBWP` 壁纸帧处理~~ 已定（2026-11-17 用户）：照收丢弃，不回不支持。固件现状：`mb_proto.c` 对 MBWP 只记日志、不存储（stub），已等同照收丢弃，不需要改动。
 2. 用户已定（2026-11-13）：下一步做 M5（OTA / DFU）。调研结论与待定项见下一步。
-3. 用户决定：录音存储掉电安全方案（NOR 上 FAT 改目录时掉电丢整个目录）是否排期。
+3. ~~录音存储掉电安全方案~~ 已收尾（2026-11-17，`fsync` 保持 5 分钟）：复位实测两次（`0036_v1_power_cut/`），正在写的段整段丢失（≤60 s，无法靠文件系统找回），已关闭的段与 FAT 完好。`ACKED.txt` 压缩改为写临时文件再改名，已合入本地 `main`（`33729d2`），V1 构建通过，**未上板实测**。已推送 `origin/main` = `7babd9c`（SSH 恢复后普通推送，无强推）。sidecar、按小时文件不做。
 
 ## 下一步
+- **明天继续（2026-11-17 收工）**：
+  - ~~门控误触发~~ **已合入 main 并推送（2026-11-18，`origin/main` = `87b2059`）**：密度门 38 帧内 ≥15 说话帧 + 预录 60 帧（1.2 s）。V1 上板：敲击 0 段（0043，嘈杂背景、门槛 18 时测）、词头不切、单字 10 次录到 7 个（0044）。安静房间敲击复测已通过（0045：敲击单独开段 0 次，只有咳嗽开段）；遗留：单字召回没有旧门控基准；583 仍开 1 段；嘈杂背景误开段多。V1 现跑这一版（main.bin `350dc731…`）。
+  - 回充采样（`0038_v1_recharge/`）：已停。V1 18:15 起拔着充电器在放电，`full` 拔掉后不清零。继续时：放电到 ~4.0 V → 插回 → `scripts/battery_log.py /dev/ttyACM0 … --slow 60` 后台全程采样、不复位，看 `full` 何时置位。
+  - ~~上报 `hw` / `fw_version`~~ **已完成（2026-11-18）**：用户定 `hw`=1、`fw_version` 1.15.35、电量字段同参考设备；App 的 `arm_ota` 回 `denied`，不装原厂包。见上方「阶段 1 原版 App 互通」。
+- 待办（2026-11-17 用户确认加入）：**主控降配评估**，详见 `goal.md`。要点：固件不用 PSRAM，SRAM 堆最高约 33%；要片内充电只能选 `SF32LB52x`（520/523/525/527）；523UB6 与 525 只差 PSRAM 容量，改动最小；520U36 无 PSRAM 但片内 1 MB 放不下固件，需核实启动和分区。当前 `weband_hw` 仍按 525，不阻塞打样。
 - 待办（2026-11-16 用户提出）：**Weband 没有蜂鸣器**，用户提示只能靠 LED 等方式，各状态的闪法待定，见 `goal.md`。
-- **M5 OTA / DFU：已完成（2026-11-13）**，已快进合入 Weband `main` 并推送（`origin/main` = `4ccce97`），worktree 与分支已清理；不入库的镜像、升级包与拉回的录音已移到主仓 `evidence/0020_m5_ota/`。板上跑最终版 `main.bin` `d706c012…`（构建 `Nov 13 2026 14:00:44`，经 BLE OTA 装上），开放模式。证据：Weband `evidence/digest.md` 2026-11-13 M5 一节、`evidence/0020_m5_ota/`。
+- **M5 OTA / DFU：已完成（2026-11-13）**，已快进合入 Weband `main` 并推送（`origin/main` = `d3b0d9b`），worktree 与分支已清理；不入库的镜像、升级包与拉回的录音已移到主仓 `evidence/0020_m5_ota/`。板上跑最终版 `main.bin` `d706c012…`（构建 `Nov 13 2026 14:00:44`，经 BLE OTA 装上），开放模式。证据：Weband `evidence/digest.md` 2026-11-13 M5 一节、`evidence/0020_m5_ota/`。
   - 结果：不开窗被拒 5/5；A→B 11/11；断线续传 9/9；C→最终版 8/8（46 s，11.2 KB/s）；OTA 后回读主程序区与最终版逐字节一致；开窗过期被拒 6/6；OTA 后拉录音 17/17；配对跨三次 OTA 保持。
-  - 记的 TODO：不上报 `hw` / `fw_version`；离线包不签名，只靠 arm_ota 闸门；板上 rt_tick 慢约 1%；安装器有两条告警（结果正常，未深究）；安装中掉电续装未实测。
+  - 记的 TODO：~~不上报 `hw` / `fw_version`~~（2026-11-18 已做）；离线包不签名，只靠 arm_ota 闸门；板上 rt_tick 慢约 1%；安装器有两条告警（结果正常，未深究）；安装中掉电续装未实测。
 - （以下为开工前的调研记录）
   - V1 用 SiFli SDK 自带的 BLE DFU（`dfu_ctrl` / `ble_dfu`，固件字符串），走 SiFli 串口传输服务（App 里服务 UUID `00000000-0000-0000-6473-5f696c666973`）；App 自己实现 SiFli DFU 协议（START_REQ / PACKET / END_RSP）。V1 另加了一道：`dfu install denied: not armed by authenticated peer`，即 M2 的 `arm_ota` 窗口；OTA 前封口录音（`OTA recorder seal`）。
   - 我们的分区已就位：`dfu_flash_code` 0x720000（384 KB）、`dfu_download_region` 0x780000（1152 KB）。SDK 打包工具有 Python 版（`tools/secureboot/imgtoolv37.py`、`dfu_bin_generate37.py`），Linux 可用。M5 不缺硬件；刷坏了可以随时用 UART + sftool 恢复。
