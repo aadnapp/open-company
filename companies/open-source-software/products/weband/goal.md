@@ -2,6 +2,8 @@
 
 - 产品：Weband（`incubating`），对标参考设备的 SF32LB52 硬件产品，本阶段只做固件。
 - 代码仓库：`/home/whole/data/reawork/weband`，远端 `git@github.com:aadnapp/weband.git`（私有）；`codebaseId` 待建公开仓库后补。
+- **开发版与正式版（2026-11-20 用户定）：两者唯一的差异是广播的设备名**。开发版用参考设备的名字前缀（原版 App 认的那个，值只放在仓库外 `~/.config/weband/adv_name`，按红线 3 不入库），正式版用 `Weband`。其它行为一律相同：都只用按键配对（`button_confirm`），都不打印配对码，都不允许输码配对。
+  - 现状与此不符（待改，见 `handoff.md` 待办17）：`WEBAND_DEV_PAIR_CODE=1` 的开发版仍会把配对码打到串口、接受输码配对，开机日志与 `fw` 带开发版提示；`WEBAND_KEY_DEBUG=1` 另加按键调试日志。
 - 硬件（2026-11-17 用户确认）：**主力是参考设备 V1 实物，刷 Weband，板级 `sf32lb52-weband-v1`**。SF32LB52-DevKit-Nano-R16N16（板级 `sf32lb52-weband`）只作开发板用，下文标「仅 Nano」的限制不适用于 V1。
 
 ## 当前阶段目标：阶段 1（Phase 1）原版 App 互通（2026-11-18 用户提出）
@@ -20,7 +22,7 @@
      - 构建（Weband `948150c`）：正式版不打印配对码；`WEBAND_DEV_PAIR_CODE=1` 编开发版，原版 App 输码配对时码打到串口，开机日志与 `fw` 命令标明是开发版。正式版 V1 编译确认镜像里没有配对码字符串。命令见 `docs/operator-manual.md` 6.2。
      - 影响（2026-11-19 更正）：原版 App 的配对方式由 `hw` 与 `caps` 决定。`hw=1` 时只发输码，所以报 `hw=1` 的正式版不能用原版 App 配对；现在默认报 `hw=2` 且 `caps` 含 `button_pair`，原版 App 发 `button_confirm`，已实测配对通过（`evidence/0048_v1_hw2_button_pair/`、`0049_v1_hw2_full_check/`），jadx 核对了判定逻辑（见阶段 2 差异分析）。输码路径只有开发版（`WEBAND_DEV_PAIR_CODE=1`）才会用到。
      - 已定：正式版收到输码方式的 `pair_begin` 回明确拒绝（`unsupported_method`），见上，`6db9588`。
-  2b. **待办：设备能力（`device_features` 的 `caps`）（2026-11-18 用户加入）**。2026-11-19 已核对三项协议与工作量（`refdevice-files/analysis/caps-night-storage-skip.md`）：`transfer_skip` 小、`storage_clear` 中、`night_schedule` 大；用户 2026-11-19 定先做 `transfer_skip`：已在分支实现并通过主机单测，待上板；`storage_clear`、`night_schedule` 待定。现在回空列表 `[]`（App 1.4.0 没有 `transfer_skip` 时直接放行）。V1 固件声明 5 项：`night_schedule`（夜间计划）、`storage_clear`（清空存储）、`transfer_skip`（跳过传输）、`wallpaper_persist`（壁纸保存，Weband 无屏，可能不做）、`ota_session`（OTA 会话）。每项做完再加进列表；各自的命令格式要从 V1 固件字符串与 App 1.4.0 核对。依据：V1 `{"type":"device_features","protocol_version":2,"caps":%s}`；App 缺 `transfer_skip` 时提示"当前固件无法恢复跳过记录"。
+  2b. **待办：设备能力（`device_features` 的 `caps`）（2026-11-18 用户加入）**。2026-11-19 已核对三项协议与工作量（`refdevice-files/analysis/caps-night-storage-skip.md`）：`transfer_skip` 小、`storage_clear` 中、`night_schedule` 大；`transfer_skip` 已做完（Nano 台架通过、V1 小时队列台架 20/20，待合入 `main`）；用户 2026-11-19 定 `storage_clear`、`night_schedule` 都做，2026-11-20 都已在 V1 真机验证通过（见 `handoff.md`、Weband `evidence/0062_v1_name_clear_night/`）；`caps` 现含 `button_pair`、`transfer_skip`、`storage_clear`、`night_schedule`，`wallpaper_persist`、`ota_session` 不做。现在回空列表 `[]`（App 1.4.0 没有 `transfer_skip` 时直接放行）。V1 固件声明 5 项：`night_schedule`（夜间计划）、`storage_clear`（清空存储）、`transfer_skip`（跳过传输）、`wallpaper_persist`（壁纸保存，Weband 无屏，可能不做）、`ota_session`（OTA 会话）。每项做完再加进列表；各自的命令格式要从 V1 固件字符串与 App 1.4.0 核对。依据：V1 `{"type":"device_features","protocol_version":2,"caps":%s}`；App 缺 `transfer_skip` 时提示"当前固件无法恢复跳过记录"。
   3. App 升级入口未实测（App 内置 v1 包 `1.15.31` < `1.15.35`，预期提示"已是最新"）。
   3b. 录音按小时一个文件（2026-11-19 用户要求，与参考设备一致）：已合入本地 `main`（`01a195e` + 修复 `6ce68e5`，未推送），主机单测与 V1 正式版编译通过。**Nano 实测通过（2026-11-19，Weband `evidence/0057_nano_hourly_rec/`）**：原版 App 1.4.0 一次连接收下 217 个文件（旧 `.ogg` 与小时文件，含 `file_spans`），0 error，文件间空档 6–32 ms（原约 3.4 s）；跨整点封口、热重启续写、清理正常。实测中修了两个缺陷：`file_spans` 帧类型错（App 回 error 并反复重连）、一个旧文件读失败就停传全部旧文件；缺陷期间空间不足，删了 10 个未同步的旧录音。未测：安静小时的空文件、App 同步时状态是否还跳（用户暂不看）、V1 上的 SD NAND、断电续写与休眠保时（Nano 复位即断电）。V1 未烧这一版。
   4. `runtime_hours`（开机小时）、`rec_gap_ms`（固定 0）、电量曲线是自有定义。
