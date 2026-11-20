@@ -330,7 +330,7 @@ def read_products():
         if not (pdir / "Productfile.yaml").exists() or pdir.name in TEMPLATE_PRODUCTS:
             continue
         p = {"id": pdir.name, "milestones": [], "waiting": [], "updated": None,
-             "todos": [], "todo_items": [], "has_goal": (pdir / "goal.md").exists(), "has_handoff": (pdir / "handoff.md").exists()}
+             "todos": [], "todo_items": [], "status_text": "", "done_features": [], "has_goal": (pdir / "goal.md").exists(), "has_handoff": (pdir / "handoff.md").exists()}
         if p["has_goal"]:
             for line in (pdir / "goal.md").read_text(encoding="utf-8").splitlines():
                 cells = [c.strip() for c in line.strip().strip("|").split("|")]
@@ -345,12 +345,23 @@ def read_products():
             if m:
                 p["waiting"] = [re.sub(r"^\d+\.\s*", "", l.strip()) for l in m.group(1).splitlines()
                                 if re.match(r"\s*(\d+\.|-)\s", l) and "~~" not in l[:12]]
+            # 「已完成功能」：### 功能名，其下 - 条目（做完的待办移到这里，保留编号）
+            m = re.search(r"^## *已完成功能.*?\n(.*?)(?=^## |\Z)", text, re.M | re.S)
+            if m:
+                for l in m.group(1).splitlines():
+                    if l.startswith("### "):
+                        p["done_features"].append((l[4:].strip(), []))
+                    elif re.match(r"-\s", l) and p["done_features"]:
+                        p["done_features"][-1][1].append(l[2:].strip())
+            m = re.search(r"^## *现状.*?\n(.*?)(?=^## |\Z)", text, re.M | re.S)
+            p["status_text"] = m.group(1) if m else ""
             m = re.search(r"^## *待办清单.*?\n(.*?)(?=^## |\Z)", text, re.M | re.S)
             if m:
                 for l in m.group(1).splitlines():
-                    mm = re.match(r"\s*-\s*\[(高|中|低)\]\[([^\]]+)\]\s*(.*)$", l)
+                    mm = re.match(r"\s*-\s*(?:待办(\d+)\s*)?\[(高|中|低)\]\[([^\]]+)\]\s*(.*)$", l)
                     if mm:
-                        p["todo_items"].append(mm.groups())
+                        num, pr, st, tx = mm.groups()
+                        p["todo_items"].append((pr, st, tx, int(num) if num else None))
             # 没有「待办清单」时的兜底：「下一步」一节里没有划掉、没写「已完成」的条目（含缩进的子条目）；调研记录之后不再收
             m = re.search(r"^## *下一步.*?\n(.*?)(?=^## |\Z)", text, re.M | re.S)
             if m:
@@ -577,37 +588,125 @@ def runs_table(runs, running):
 PRIO_CLASS = {"高": "bad", "中": "warn", "低": "idle"}
 
 
-def todo_block(p):
+def stale_warning(p, activity):
+    """Warn when handoff.md's 「最近更新」 is more than a day older than the product's newest activity-log record
+    (heartbeats ignored). Returns an HTML snippet or ''."""
+    if not p["updated"]:
+        return ""
+    roles = {r for r, prod in known_roles().items() if prod.lower() == p["id"].lower()}
+    times = [r["t"].replace(tzinfo=None) for r in activity if r.get("role") in roles and r["kind"] != "heartbeat"]
+    if not times:
+        return ""
+    try:
+        upd = dt.datetime.fromisoformat(p["updated"])
+    except ValueError:
+        return ""
+    last = max(times)
+    if last - upd <= dt.timedelta(days=1):
+        return ""
+    return ('<p class="stale">⚠ handoff.md 的「最近更新」是 %s，比最近一条活动记录（%s）旧 %d 天，'
+            '下面的待办可能已过期；更新 handoff 时要回看「待办清单」。</p>'
+            % (esc(p["updated"]), esc(last.strftime("%Y-%m-%d %H:%M")), (last - upd).days))
+# 「现状」里表示做完的词，和同一句里表示没做完的词（后者出现就不算做完）
+DONE_RE = re.compile(r"通过|已[^，。；：]{0,8}合入|已推送|已完成")
+NOT_DONE_RE = re.compile(r"未(合入|上板|推送|运行|能|测|烧录|实测|验证|做)|不通过|没通过|待")
+# 标题里有这些词的待办本来就是「做完之后的剩余项」，不拿来比
+LEFTOVER_RE = re.compile(r"剩余|遗留|未测|未实测|小项")
+# 太泛的词（几乎每条都提到）和提交号不拿来比
+GENERIC_TERMS = {"main", "origin/main"}
+HASH_RE = re.compile(r"[0-9a-f]{7,40}")
+def done_todo_hints(p):
+    """To-do items whose key terms appear in 「现状」 as done (通过 / 已合入 / 已推送 / 已完成).
+    Key terms: `backticked` tokens in the item title (before the first ：), minus GENERIC_TERMS and
+    commit hashes. A 「现状」 bullet counts as done for a term when the bullet's lead-in (text before the
+    first ：) says done (and names no other `subject`, or names this term), or one sentence (split on 。；;) holding the term says done; either way a
+    not-done word (未合入 / 待 / ...) in that same text cancels it. ~~struck~~ text is ignored.
+    Returns [(title, evidence)]."""
+    units = [re.sub(r"~~.*?~~", "", l).strip(" -*") for l in p.get("status_text", "").splitlines()]
+    def done(s):
+        return DONE_RE.search(s) and not NOT_DONE_RE.search(s)
+    hits = []
+    for _prio, _st, text, num in p["todo_items"]:
+        title = re.split(r"[:：]", text, 1)[0]
+        if LEFTOVER_RE.search(title):
+            continue
+        terms = [x for x in re.findall(r"`([^`]{3,})`", title) if x not in GENERIC_TERMS and not HASH_RE.fullmatch(x)]
+        ev = None
+        for term in terms:
+            for u in units:
+                if term not in u:
+                    continue
+                head = re.split(r"[:：]", u, 1)[0]
+                # 引言里点名了别的东西（`x`，路径除外）就只对它们算数；term 所在那句写了「未…」也不算
+                subjects = [x for x in re.findall(r"`([^`]+)`", head) if "/" not in x]
+                own = next((s for s in re.split(r"[。；;]", u) if term in s), "")
+                if done(head) and (term in head or not subjects) and not NOT_DONE_RE.search(own):
+                    ev = head
+                else:
+                    ev = next((s.strip() for s in re.split(r"[。；;]", u) if term in s and done(s)), None)
+                if ev:
+                    break
+            if ev:
+                break
+        if ev:
+            hits.append((("待办%d " % num if num else "") + title, ev.strip("* ")))
+    return hits
+def todo_block(p, activity=()):
     """The product's to-do list, made prominent: count badge, then items grouped 高/中/低.
     Source is handoff.md 「待办清单」 (curated); without it, falls back to heuristic lines."""
     items = p["todo_items"]
+    warn = stale_warning(p, activity)
+    hints = done_todo_hints(p)
+    if hints:
+        warn += ('<div class="stale">⚠ 以下待办在「现状」里已写成通过或已合入，可能该移到「已完成功能」：<ul>%s</ul></div>'
+                 % "".join("<li><b>%s</b>（「现状」：%s）</li>"
+                           % (esc(ti), esc(s if len(s) <= 160 else s[:160] + "…")) for ti, s in hints))
     if not items:
         lis = "".join("<li>%s</li>" % esc(t if len(t) <= 220 else t[:220] + "…") for t in p["todos"]) or "<li>无</li>"
         return ('<div class="todo"><h4 class="todo-h">待办 <span class="badge">%d</span>'
-                '<small>handoff.md 没有「待办清单」一节，以下为按关键词猜的</small></h4><ul>%s</ul></div>'
-                % (len(p["todos"]), lis))
+                '<small>handoff.md 没有「待办清单」一节，以下为按关键词猜的</small></h4>%s<ul>%s</ul></div>'
+                % (len(p["todos"]), warn, lis))
     cnt = {k: sum(1 for i in items if i[0] == k) for k in "高中低"}
     head = "".join('<span class="tag %s">%s %d</span> ' % (PRIO_CLASS[k], k, cnt[k]) for k in "高中低" if cnt[k])
-    rows = "".join('<li class="p-%s"><span class="tag %s">%s</span> <span class="st">%s</span> %s</li>'
-                   % (PRIO_CLASS[pr], PRIO_CLASS[pr], esc(pr), esc(st), esc(tx)) for pr, st, tx in items)
+    rows = "".join('<li class="p-%s"><b class="num">%s</b> <span class="tag %s">%s</span> <span class="st">%s</span> %s</li>'
+                   % (PRIO_CLASS[pr], "待办%d" % num if num else "", PRIO_CLASS[pr], esc(pr), esc(st), esc(tx))
+                   for pr, st, tx, num in items)
     return ('<div class="todo"><h4 class="todo-h">待办 <span class="badge">%d</span> %s'
-            '<small>来源 handoff.md「待办清单」，高优先在前</small></h4><ul>%s</ul></div>' % (len(items), head, rows))
+            '<small>来源 handoff.md「待办清单」，高优先在前</small></h4>%s<ul>%s</ul></div>' % (len(items), head, warn, rows))
 
 
-def products_section(products):
+def done_block(p, done_ms):
+    """Completed features at the end of the product card: handoff.md 「已完成功能」 (### feature, the
+    finished to-dos listed under it), then goal.md milestones whose status starts with 已完成."""
+    feats = p.get("done_features", [])
+    if not feats and not done_ms:
+        return ""
+    parts = []
+    for name, items in feats:
+        lis = "".join("<li>%s</li>" % esc(i) for i in items)
+        parts.append("<li><b>%s</b>%s</li>" % (esc(name), "<ul>%s</ul>" % lis if lis else ""))
+    for a, b, c in done_ms:
+        parts.append("<li><b>%s %s</b> <small>%s</small></li>" % (esc(a), esc(b), esc(c)))
+    return ('<div class="done"><h4>已完成功能 <span class="badge">%d</span>'
+            '<small>来源 handoff.md「已完成功能」与 goal.md 已完成的里程碑；做完的待办移到对应功能下</small></h4>'
+            '<ul>%s</ul></div>' % (len(feats) + len(done_ms), "".join(parts)))
+def products_section(products, activity=()):
     out = []
     for p in products:
         if not p["has_goal"] and not p["has_handoff"]:
             out.append('<div class="card idle"><h3>%s</h3><p>没有 goal.md / handoff.md</p></div>' % esc(p["id"]))
             continue
-        ms = "".join("<tr><td>%s</td><td>%s</td><td>%s</td></tr>" % (esc(a), esc(b), esc(c)) for a, b, c in p["milestones"])
+        # 没做完的里程碑留在顶部；已完成的里程碑和 handoff「已完成功能」放到卡片最后
+        open_ms = [m for m in p["milestones"] if not m[2].startswith("已完成")]
+        done_ms = [m for m in p["milestones"] if m[2].startswith("已完成")]
+        ms = ('<table><thead><tr><th scope="col">项</th><th scope="col">内容</th><th scope="col">状态</th></tr></thead>'
+              '<tbody>%s</tbody></table>' % "".join("<tr><td>%s</td><td>%s</td><td>%s</td></tr>" % tuple(esc(x) for x in m)
+                                                 for m in open_ms)) if open_ms else ""
         wt = "".join("<li>%s</li>" % esc(w) for w in p["waiting"]) or "<li>无</li>"
-        td = todo_block(p)
+        td = todo_block(p, activity)
         out.append('<div class="card"><h3>%s <small>handoff 更新：%s</small></h3>'
-                   '<table><thead><tr><th scope="col">项</th><th scope="col">内容</th><th scope="col">状态</th></tr></thead>'
-                   '<tbody>%s</tbody></table><h4>等人处理</h4><ul>%s</ul>'
-                   '%s</div>'
-                   % (esc(p["id"]), esc(p["updated"] or "未写"), ms, wt, td))
+                   '%s<h4>等人处理</h4><ul>%s</ul>%s%s</div>'
+                   % (esc(p["id"]), esc(p["updated"] or "未写"), ms, wt, td, done_block(p, done_ms)))
     return "\n".join(out)
 
 
@@ -658,6 +757,8 @@ th{background:#eef1f4} td ul{margin:2px 0 2px 16px;padding:0} code{font-size:12p
 .todo-h{font-size:16px;color:#111;margin:0 0 6px} .todo-h small{margin-left:8px}
 .badge{display:inline-block;min-width:22px;text-align:center;padding:1px 8px;border-radius:11px;background:#d64545;color:#fff;font-size:14px}
 .todo ul{list-style:none;margin:0;padding:0} .todo li{font-size:14px;padding:4px 0;border-bottom:1px dotted #e3c9c9}
+.done{margin-top:12px;border-top:1px solid #ddd;padding-top:6px} .done ul ul{margin:2px 0 6px 18px;font-size:13px;color:#444}
+.todo .stale{background:#fff3cd;border:1px solid #e0b84c;color:#6b4e00;padding:4px 8px;margin:0 0 6px;font-size:13px}
 .todo li.p-bad{font-weight:600} .todo .st{color:#555;font-size:12px;border:1px solid #bbb;border-radius:3px;padding:0 4px;font-weight:normal}
 .tag.idle{background:#8892a0}
 pre{background:#f3f5f7;padding:8px;font-size:12px;white-space:pre-wrap}
@@ -699,7 +800,7 @@ def build(days, out):
     body = {
         "roles": '<div class="grid">%s</div>' % role_cards(events, runs, activity, manual, products, running, now),
         "todo": '<div class="grid">%s</div><h4>needs-owner.log（最近 20 行）</h4><pre>%s</pre>'
-                % (products_section(products), esc("\n".join(needs[-20:]) or "无")),
+                % (products_section(products, activity), esc("\n".join(needs[-20:]) or "无")),
         "activity": activity_table(activity, now),
         "chat": chat_table(chat, now.date()),
         "history": chat_history(chat_all, now.date()),

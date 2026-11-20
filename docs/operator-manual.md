@@ -33,8 +33,15 @@
 # 图形化报告，各节顺序固定（由 build_report.py 的 SECTION_ORDER 决定）：
 # 数据时间 → 各角色概览 → 产品待办与待人处理 → 今日活动 → 今日对话记录 → 历史对话
 # → 今日各角色 digest → 时间线 → Agent 运行记录 → 手动任务证据
-# 「产品待办」读各产品 handoff.md 的「## 待办清单」一节，格式 `- [高|中|低][状态] 标题：说明`；
-# 每次更新 handoff 都回看这一节，做完的删掉，新增的补上。
+# 「产品待办」读各产品 handoff.md 的「## 待办清单」一节，格式 `- 待办<编号> [高|中|低][状态] 标题：说明`；
+# 编号一经分配不改、不复用，新条目取最大编号加 1，对话里可以用「待办N」指代；
+# 每次更新 handoff 都回看这一节，新增的补上；做完的连同编号移到「## 已完成功能」对应功能（### 标题）下。
+# 报告把「已完成功能」和 goal.md 里状态为「已完成」的里程碑放在产品卡片最后，没做完的里程碑留在顶部。
+# handoff.md 的「最近更新」比该产品最新一条活动记录（不含心跳）旧超过 1 天时，待办标题下显示黄色警告；
+# 看到警告就回看「待办清单」和「等待项」，更新后把「最近更新」改成今天。
+# 另一条警告比内容：待办标题里的 `反引号词`（不含 main、origin/main 和提交号）在「现状」里出现在写着
+# 通过 / 已合入 / 已推送 / 已完成 的条目引言或同一句里（同句有「未…」「待」不算），就列出该条，提示可能该移到「已完成功能」。
+# 标题含「剩余 / 遗留 / 未测 / 小项」的待办不比。规则在 build_report.py 的 done_todo_hints()。
 xdg-open ~/.local/state/open-company/report/index.html
 
 # 今天的活动日志（IDE 会话记的进展 + Stop hook 心跳），一行一条 JSON
@@ -73,7 +80,7 @@ cd /home/whole/data/src/open-company/scripts/report && python3 build_digests.py 
 
 产品进度以产品目录下的两份文件为准，**里程碑或等待项变化时要更新**（晚间盘点超过 3 天没更新会列入督办）：
 - `companies/open-source-software/products/weband/goal.md`：目标、里程碑、结案条件
-- `companies/open-source-software/products/weband/handoff.md`：现状、等待项、下一步、证据索引，顶部写「最近更新」日期
+- `companies/open-source-software/products/weband/handoff.md`：现状、等待项、下一步、证据索引，顶部写「最近更新」日期。每次改它都要同时回看「待办清单」和「等待项」（规则见 `.kiro/steering/activity-log.md`），否则报告的产品待办会过期
 
 ---
 
@@ -274,6 +281,7 @@ python3 -m serial.tools.miniterm --rts 0 --dtr 0 --eol CR /dev/serial/by-id/usb-
   ```
 - 用 `--eol CR`，不要用 `CRLF`（否则一次回车被当成两次，出现 `msh />msh />`）。
 - 命令一条一条打，不要一次粘贴多行，否则会丢字符。
+- **日志行首方括号里的数字是 32768 Hz 计数，不是毫秒**（如 `[95193]` 是 2.9 s）。算启动耗时时除以 32768，或用主机时钟计时；2026-11-20 曾因此误判"开机慢"。
 - 同一时间只能有一个程序占用串口，**烧录前先退出 miniterm**。
 
 ### 6.5 引脚手动测试（shell 里一条一条打）
@@ -455,3 +463,5 @@ sudo modprobe -r btusb && sudo modprobe btusb
 | `whoopsie` 长时间 100% CPU | 卡在上传 `/var/crash` 里的大崩溃报告 | 见第 4 节「whoopsie 占满 CPU」 |
 | Kiro 突然退出，崩溃报告 `Signal: 5` | 多半是子进程被外部 SIGTERM 后 GPU 进程不可用，不是 Kiro 自身 bug | 查 `journalctl` 里同一时刻的 OOM 和进程终止记录，见第 4 节 |
 | 晚间盘点把产品标成 blocked | `goal.md` / `handoff.md` 缺失或太久没更新 | 更新产品目录下这两份文件 |
+| 报告「产品待办」标题下有黄色「handoff.md 的最近更新…旧 N 天」警告 | `handoff.md` 比活动日志旧超过 1 天，待办清单可能过期 | 回看「待办清单」「等待项」并更新「最近更新」 |
+| 报告「产品待办」下有黄色「以下待办在「现状」里已写成通过或已合入」 | 「现状」写了做完，待办清单没删 | 确认后删掉该条待办；是误报（比如还有剩余项）就把标题写成「…剩余验证」 |
