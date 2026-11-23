@@ -228,15 +228,13 @@ scripts/build.sh <工程目录> sf32lb52-weband          # 编其它 SCons 工�
 ```
 `build.sh` 会检查 SDK 是否在固定 commit `87d5700a`，不在就拒绝编译。产物在 `<工程目录>/build_sf32lb52-weband_hcpu/`。
 
-V1 固件（`app/project`，板 `sf32lb52-weband-v1`）有两种构建（2026-11-18 用户定：产品用按键配对，开发阶段可从串口看配对码）：
-
+V1 固件（`app/project`，板 `sf32lb52-weband-v1`）有两种构建，两者唯一的差异是广播名（2026-11-20 用户定）：
 ```bash
-scripts/build.sh app/project sf32lb52-weband-v1                          # 正式版：不打印配对码，配对靠单击电源键（button_confirm）
-WEBAND_DEV_PAIR_CODE=1 scripts/build.sh app/project sf32lb52-weband-v1   # 开发版：原版 App 输码配对时，码打到串口
+scripts/build.sh app/project sf32lb52-weband-v1                      # 正式版：广播 Weband-XXXX
+WEBAND_DEV_BUILD=1 scripts/build.sh app/project sf32lb52-weband-v1   # 开发版：广播原版 App 认的名字前缀
 ```
-- 开发版编译时会打印 `Do not ship`，开机日志有 `development build: pairing codes are printed on the console`，`fw` 命令也会显示。不要把开发版交给用户。
-- 串口里的配对码是 `I/mb_plat main: pair code NNNNNN`，300 秒有效、用一次失效。写进证据或文档前替换成 `****`。
-- 广播名（2026-11-18 用户定）：正式版 `Weband-XXXX`；开发版自动用原版 App 认的前缀，名字从仓库外的 `~/.config/weband/adv_name` 读（参考设备名不入库，文件不存在时开发版退回 `Weband` 并在编译时提示）。`WEBAND_ADV_NAME=…` 可临时覆盖两者。
+- 两种构建都只用按键配对（单击电源键，`button_confirm`），输码配对返回 `unsupported_method`。两种构建都把配对码打到串口（`I/mb_plat main: pair code NNNNNN`，300 秒有效、用一次失效），写进证据或文档前替换成 `****`。
+- 广播名：正式版 `Weband-XXXX`；开发版用原版 App 认的前缀，名字从仓库外的 `~/.config/weband/adv_name` 读（参考设备名不入库，文件不存在时开发版退回 `Weband` 并在编译时提示）。`WEBAND_ADV_NAME=…` 可临时覆盖两者。
 - 两种构建都上报 `hw=2`、`fw_version` `2.15.35`（原版 App 据此走按键配对）。
 - `WEBAND_KEY_DEBUG=1`：串口记每次按键按下/松开与按住时长（开发排查用）。
 
@@ -412,11 +410,11 @@ sudo modprobe -r btusb && sudo modprobe btusb
 | 操作 | 板子做什么 |
 |---|---|
 | 单击 | 开始/结束一段灵感录音（不过门控、单独成段），到时自动结束：默认 60 s，App 可用 `{"type":"idea_config","timeout_s":10..600}` 设置，`{"type":"idea_toggle"}` 也能开关 |
-| 双击 | 重新配对：删配对令牌、清 BLE 绑定、重启；正在录灵感时等这段结束再做 |
-| 长按 6 s | 重启（有挂起的重新配对会先做）。Nano 上按住 10 s 是硬件复位 |
+| 双击 | 重新配对：删配对令牌、清 BLE 绑定、重启；正在录灵感时先结束并封好这段再做（2026-11-23 起，原厂是等录完） |
+| 长按 6 s | 重启。Nano 上按住 10 s 是硬件复位 |
 
 - 按得太短（< 40 ms）不算单击；开机时按着的键要先松开才识别。
-- **双击清了板子的 BLE 绑定后，手机/电脑上的旧绑定要手动删**（手机"忽略此设备"，本机 `bluetoothctl remove 5C:FD:52:70:01:87`），否则加密会被板子拒绝、连不上。
+- 2026-11-23 起固件不要求 BLE 链路加密、连接时也不发安全请求（与原厂 V1 一致，证据 `0089`），手机不再弹系统配对框。安全只靠 App 层令牌 + HMAC 鉴权。之前烧过旧固件的手机若系统蓝牙里还留着旧绑定，可以删掉（手机"忽略此设备"，本机 `bluetoothctl remove <地址>`），不删一般也能连。
 - 台架脚本已改为"在同一次扫描里发现并连接"（`ble_m2_check.py` 的 `connect_live`），因为 Ubuntu 20.04 的 BlueZ 在扫描停止时会删掉未绑定设备的对象。
 
 ### 6.10 固件 OTA（M5，经 BLE）

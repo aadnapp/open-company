@@ -2,8 +2,8 @@
 
 - 产品：Weband（`incubating`），对标参考设备的 SF32LB52 硬件产品，本阶段只做固件。
 - 代码仓库：`/home/whole/data/reawork/weband`，远端 `git@github.com:aadnapp/weband.git`（私有）；`codebaseId` 待建公开仓库后补。
-- **开发版与正式版（2026-11-20 用户定）：两者唯一的差异是广播的设备名**。开发版用参考设备的名字前缀（原版 App 认的那个，值只放在仓库外 `~/.config/weband/adv_name`，按红线 3 不入库），正式版用 `Weband`。其它行为一律相同：都只用按键配对（`button_confirm`），都不打印配对码，都不允许输码配对。
-  - 现状与此不符（待改，见 `handoff.md` 待办17）：`WEBAND_DEV_PAIR_CODE=1` 的开发版仍会把配对码打到串口、接受输码配对，开机日志与 `fw` 带开发版提示；`WEBAND_KEY_DEBUG=1` 另加按键调试日志。
+- **开发版与正式版（2026-11-20 用户定）：两者唯一的差异是广播的设备名**。开发版用参考设备的名字前缀（原版 App 认的那个，值只放在仓库外 `~/.config/weband/adv_name`，按红线 3 不入库），正式版用 `Weband`。其它行为一律相同：都只用按键配对（`button_confirm`），都不允许输码配对，都把配对码打到串口（用户 2026-11-20 定：打印两个版本都留着）。
+  - 已落实（待办17，2026-11-20）：开发版环境变量改为 `WEBAND_DEV_BUILD=1`，只换广播名；`WEBAND_LOG_PAIR_CODE` 与开发版提示已删；`WEBAND_KEY_DEBUG=1` 仍另加按键调试日志。
 - 硬件（2026-11-17 用户确认）：**主力是参考设备 V1 实物，刷 Weband，板级 `sf32lb52-weband-v1`**。SF32LB52-DevKit-Nano-R16N16（板级 `sf32lb52-weband`）只作开发板用，下文标「仅 Nano」的限制不适用于 V1。
 
 ## 当前阶段目标：阶段 1（Phase 1）原版 App 互通（2026-11-18 用户提出）
@@ -17,14 +17,15 @@
 - 用户决定：`hw`=1；`fw_version`（`1.15.35`）与电量字段同参考设备；App 下载到升级包后设备不升级（App 发的 `arm_ota` 回 `denied`，升级包开头即被拒）。
 - 为互通补的固件改动（已推送 Weband `origin/main` = `73447b6`，含后来补的 `device_features`）：`device_status`；广播带服务 UUID `…ef0`；新增 App 写命令用的控制特征 `…ef2`；广播名前缀可由本地构建覆盖（用户要求用参考设备的名字前缀，名字不入库）。
 - 遗留：
-  1. 板上现跑开发版（用户定）：配对码打到串口 + 参考设备名前缀（main.bin `7c8be8e9…`，`0050_v1_dev_hw2_default/`）。不是可交付构建。
+  1. 板上现跑正式版 Weband `5b192fd`（2026-11-23，`0090_v1_no_link_enc_repair_over_idea/`，广播 `Weband-XXXX`，已推送 `origin/main`）。此前（2026-11-18）跑的是开发版 main.bin `7c8be8e9…`（`0050_v1_dev_hw2_default/`）。
   2. **无屏配对：已定（2026-11-18 用户）采用按键配对（`button_confirm`），开发阶段支持从串口看配对码**。标签码、LED 报码不做。**正式版收到输码配对回明确拒绝**（用户定）：Weband `6db9588`，回 `{"type":"pair_result","status":"unsupported_method"}`（V1 固件里的状态串），不生成码；开发版照旧输码。V1 现跑开发版 main.bin `7c8be8e9…`（`0050_v1_dev_hw2_default/`；`0047` 的 `a85f04e5…` 是之前一版）。
-     - 构建（Weband `948150c`）：正式版不打印配对码；`WEBAND_DEV_PAIR_CODE=1` 编开发版，原版 App 输码配对时码打到串口，开机日志与 `fw` 命令标明是开发版。正式版 V1 编译确认镜像里没有配对码字符串。命令见 `docs/operator-manual.md` 6.2。
-     - 影响（2026-11-19 更正）：原版 App 的配对方式由 `hw` 与 `caps` 决定。`hw=1` 时只发输码，所以报 `hw=1` 的正式版不能用原版 App 配对；现在默认报 `hw=2` 且 `caps` 含 `button_pair`，原版 App 发 `button_confirm`，已实测配对通过（`evidence/0048_v1_hw2_button_pair/`、`0049_v1_hw2_full_check/`），jadx 核对了判定逻辑（见阶段 2 差异分析）。输码路径只有开发版（`WEBAND_DEV_PAIR_CODE=1`）才会用到。
+     - 构建（Weband `948150c`，2026-11-20 待办17 改）：两个版本都把配对码打到串口，都只用按键配对；`WEBAND_DEV_BUILD=1` 编开发版，只换广播名。正式版 V1 编译确认镜像里没有配对码字符串。命令见 `docs/operator-manual.md` 6.2。
+     - 影响（2026-11-19 更正）：原版 App 的配对方式由 `hw` 与 `caps` 决定。`hw=1` 时只发输码，所以报 `hw=1` 的正式版不能用原版 App 配对；现在默认报 `hw=2` 且 `caps` 含 `button_pair`，原版 App 发 `button_confirm`，已实测配对通过（`evidence/0048_v1_hw2_button_pair/`、`0049_v1_hw2_full_check/`），jadx 核对了判定逻辑（见阶段 2 差异分析）。输码配对现在两个版本都不支持（2026-11-20）。
+     - BLE 链路加密（2026-11-23 用户定方案 A）：不要求加密、连接时不发安全请求，与原厂 V1 一致（`evidence/0089_v1_factory_no_link_encryption/`）；此前每部没有系统绑定的新手机都会弹 Android 配对框、不点就超时。Weband `5b192fd`，V1 实测新手机按键配对通过、不弹框（`0090`）。同一提交里双击清配对改为优先于灵感录音。
      - 已定：正式版收到输码方式的 `pair_begin` 回明确拒绝（`unsupported_method`），见上，`6db9588`。
   2b. **待办：设备能力（`device_features` 的 `caps`）（2026-11-18 用户加入）**。2026-11-19 已核对三项协议与工作量（`refdevice-files/analysis/caps-night-storage-skip.md`）：`transfer_skip` 小、`storage_clear` 中、`night_schedule` 大；`transfer_skip` 已做完（Nano 台架通过、V1 小时队列台架 20/20，待合入 `main`）；用户 2026-11-19 定 `storage_clear`、`night_schedule` 都做，2026-11-20 都已在 V1 真机验证通过（见 `handoff.md`、Weband `evidence/0062_v1_name_clear_night/`）；`caps` 现含 `button_pair`、`transfer_skip`、`storage_clear`、`night_schedule`，`wallpaper_persist`、`ota_session` 不做。现在回空列表 `[]`（App 1.4.0 没有 `transfer_skip` 时直接放行）。V1 固件声明 5 项：`night_schedule`（夜间计划）、`storage_clear`（清空存储）、`transfer_skip`（跳过传输）、`wallpaper_persist`（壁纸保存，Weband 无屏，可能不做）、`ota_session`（OTA 会话）。每项做完再加进列表；各自的命令格式要从 V1 固件字符串与 App 1.4.0 核对。依据：V1 `{"type":"device_features","protocol_version":2,"caps":%s}`；App 缺 `transfer_skip` 时提示"当前固件无法恢复跳过记录"。
   3. App 升级入口未实测（App 内置 v1 包 `1.15.31` < `1.15.35`，预期提示"已是最新"）。
-  3b. 录音按小时一个文件（2026-11-19 用户要求，与参考设备一致）：已合入本地 `main`（`01a195e` + 修复 `6ce68e5`，未推送），主机单测与 V1 正式版编译通过。**Nano 实测通过（2026-11-19，Weband `evidence/0057_nano_hourly_rec/`）**：原版 App 1.4.0 一次连接收下 217 个文件（旧 `.ogg` 与小时文件，含 `file_spans`），0 error，文件间空档 6–32 ms（原约 3.4 s）；跨整点封口、热重启续写、清理正常。实测中修了两个缺陷：`file_spans` 帧类型错（App 回 error 并反复重连）、一个旧文件读失败就停传全部旧文件；缺陷期间空间不足，删了 10 个未同步的旧录音。未测：安静小时的空文件、App 同步时状态是否还跳（用户暂不看）、V1 上的 SD NAND、断电续写与休眠保时（Nano 复位即断电）。V1 未烧这一版。
+  3b. 录音按小时一个文件（2026-11-19 用户要求，与参考设备一致）：已合入 `main`（`01a195e` + 修复 `6ce68e5`，2026-11-23 核对已推送），主机单测与 V1 正式版编译通过。**Nano 实测通过（2026-11-19，Weband `evidence/0057_nano_hourly_rec/`）**：原版 App 1.4.0 一次连接收下 217 个文件（旧 `.ogg` 与小时文件，含 `file_spans`），0 error，文件间空档 6–32 ms（原约 3.4 s）；跨整点封口、热重启续写、清理正常。实测中修了两个缺陷：`file_spans` 帧类型错（App 回 error 并反复重连）、一个旧文件读失败就停传全部旧文件；缺陷期间空间不足，删了 10 个未同步的旧录音。未测：安静小时的空文件、App 同步时状态是否还跳（用户暂不看）、V1 上的 SD NAND、断电续写与休眠保时（Nano 复位即断电）。V1 未烧这一版。
   4. `runtime_hours`（开机小时）、`rec_gap_ms`（固定 0）、电量曲线是自有定义。
 
 ## 阶段 2（Phase 2）复现参考设备 App（2026-11-18 用户提出）
@@ -82,7 +83,7 @@
 - 壁纸帧 `MBWP`（无屏后）：**已定（2026-11-17 用户）照收丢弃**，不回不支持。固件现状：`mb_proto.c` 对 MBWP 只记日志、不存储，已等同照收丢弃。
 - **无屏配对：按键确认（2026-11-13 用户决定）**。真实用户通过按键完成配对，替代"屏上显示 6 位码、手机输入"。V1 固件里有现成的方式名 `button_confirm`（`pair_begin` 的 `method`，另有 `pair_result` 状态 `stale` / `cancelled` 和 `request_id` 字段），但原版 App 1.3.1 只发输码方式，所以要我们自己的 App 配合。**固件侧已完成（2026-11-14，合入 main `726f78e`）**：App 发 `pair_begin` + `method:"button_confirm"`，60 s 内单击电源键即配对；过期回 `expired`；`pair_cancel` 按 V1 回 `cancelled` / `stale` / `invalid_request`。
 - **待办：莫斯码配对（2026-11-13 用户提出）**。用敲击，或"敲击 + 划动"组成的莫斯码完成配对。识别方式已定（2026-11-13 用户）：**IMU（LSM6DS3TR-C）加麦克风**，识别敲击声和划动的摩擦声。注意：V1 固件不访问 IMU，这部分是 Weband 自己的功能；V1 板上有 IMU（仅 Nano 没有，需外接模块）。待定：码由谁生成、谁比对，以及与按键确认的关系。
-- **待办：充电时不报充满（2026-11-17 发现）**。2026-11-19 进展：回充采样 `0053_v1_recharge/` 进行中；另发现 App 电量百分比在充电时偏高约 20 个百分点（电压查表，充电压降 65–70 mV），补偿在分支 `batt-pct-comp`，待上板。V1 上充电，恒流 3.1 h 后进入恒压，4.2 V 恒压近 2 小时，`full` 标志始终为 0（证据 `0027_v1_batt/batt.csv`）。推测原因：录音和广播让系统一直耗约 40 mA，充电电流降不到终止值（SDK 默认 `CHARGE_DEFAULT_EOC_CC` 10）。要验证：充电时让 V1 停止录音，再看是否报充满；再决定是否调高终止电流、或充电时降功耗。App 上报「充满」依赖这个标志。
+- **待办：充电时不报充满（2026-11-17 发现）**。2026-11-20 回充采样 `0053_v1_recharge/` 已收尾（恒流 76 min、恒压 25 min，`full` 在恒压后置位，不用复位；回充阈值未测出）；另发现 App 电量百分比在充电时偏高约 20 个百分点（电压查表，充电压降 65–70 mV），补偿在分支 `batt-pct-comp`，待上板。V1 上充电，恒流 3.1 h 后进入恒压，4.2 V 恒压近 2 小时，`full` 标志始终为 0（证据 `0027_v1_batt/batt.csv`）。推测原因：录音和广播让系统一直耗约 40 mA，充电电流降不到终止值（SDK 默认 `CHARGE_DEFAULT_EOC_CC` 10）。要验证：充电时让 V1 停止录音，再看是否报充满；再决定是否调高终止电流、或充电时降功耗。App 上报「充满」依赖这个标志。
   - 进展（2026-11-17 17:36，`0037_v1_charge_full/`）：录音没停也读到 `full=1`（`charging=0`、4164 mV），"40 mA 负载降不到终止电流"推测不成立或不完整。15:03（`full=0`）到 17:36 之间无采样，期间两次复位，转为充满的时刻和原因未知。下一步：放掉一些电后回充，全程采样记录 `full` 何时置位，看是否要复位才会置位。
   - 2026-11-18 `0051_v1_charge_full/`：插着充电器 18:26 报充满（`charging` 1→0、`full` 0→1，4170 mV），不用复位就能置位；回充采样因电脑 18:55 重启中断，回充行为与拔掉后 `full` 的变化未测。
   - 2026-11-17 18:12–18:21 开始回充采样（`0038_v1_recharge/`）：18:15 拔充电器，`full` 拔掉后也不清零（仍为 1）；用户叫停，明天继续（放电到 ~4.0 V 后插回、全程采样不复位）。
