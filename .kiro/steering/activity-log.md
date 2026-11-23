@@ -50,7 +50,8 @@ workflow 的每一步是单独的会话，**不触发 Stop hook**：不记心跳
   ```
   cron 每 10 分钟也会跑同样的命令兜底（`scripts/cron/crontab.example`）。
 - **收尾那一步更新产品状态**：一项工作合入或状态变化时，同步改产品的 `goal.md`（对应遗留或里程碑条目）和 `handoff.md`（顶部「最近更新」与对应条目），写清提交号、证据路径和没测的部分。
-- **发起 workflow 的会话（编排者）负责兜底**：写 workflow brief 时把以上三条写进去；收到 workflow 完成的通知后，核对 `goal.md` / `handoff.md` 是否已经更新到最新结论，没有就补上，再重建一次报告。之后在会话里继续做的实测和修复，同样要回写这两个文件。
+- **收尾那一步归档 workflow 产物**（2026-11-23 用户定）：workflow 写在产品仓库 `.agents/tasks/<任务>/` 下的设计、计划、评审、报告，在任务完成后搬进产品的 `evidence/NNNN_task_<任务>/`（编号取当前最大加 1，搬之前先 `ls evidence` 确认没有被别的会话占用）。目录里加一份 README，写明内容和对应提交；参考设备名按 `refdevice-files/scrub.py` 的规则替换，令牌写成 `****`；文中旧的 `.agents/tasks/...` 路径改成新目录。和已有证据重复的文件（例如同一份构建日志）不搬。搬完删掉空的 `.agents/tasks/<任务>/`，`goal.md` / `handoff.md` 里的引用同步改成新路径。
+- **发起 workflow 的会话（编排者）负责兜底**：写 workflow brief 时把以上四条写进去；收到 workflow 完成的通知后，核对 `goal.md` / `handoff.md` 是否已经更新到最新结论，没有就补上，再重建一次报告。之后在会话里继续做的实测和修复，同样要回写这两个文件。
 
 ## 更新 handoff 必须回看「待办清单」（2026-11-20 用户要求）
 
