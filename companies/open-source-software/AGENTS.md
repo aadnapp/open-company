@@ -69,6 +69,7 @@
 - 命令示例：`JAVA_OPTS="-Xmx2g" ~/tools/jadx/jadx-1.5.1/bin/jadx --no-res --no-debug-info -j 2 -d <输出目录> <apk>`。
 - 输出目录放持久位置（例如 `refdevice-files/analysis/jadx/<版本>/`），不放 `/tmp`，机器重启会清空。
 - 大 APK 同时反编译多个版本时，不要并行起多个 jadx 进程（每个 2 GB），按版本依次跑。
+- **sftool（SiFli 烧录工具）**：版本 0.2.5，可执行文件 `~/.sifli/tools/sftool/0.2.5/sftool`（已验证 `--version` 输出 `sftool 0.2.5`）。直接用这个路径调用，不用每次再去找；升级版本后更新这一条。
 
 ## 八、无人值守任务的留痕与失败可见性（2026-11-19 用户要求）
 
